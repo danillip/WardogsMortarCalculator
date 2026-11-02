@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+ <PropertyGroup Label="Globals"><ProjectGuid>{E56435C3-07D6-42E4-89D5-60B2B50FF412}</ProjectGuid><RootNamespace>WardogsCapture</RootNamespace><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+ <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><CharacterSet>Unicode</CharacterSet><UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries><UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+ <PropertyGroup><TargetName>WardogsCapture</TargetName><OutDir>$(ProjectDir)..\..\artifacts\$(Platform)\$(Configuration)\Companion\</OutDir><IntDir>$(ProjectDir)..\..\artifacts\obj\$(Platform)\$(Configuration)\Companion\</IntDir></PropertyGroup>
+ <ItemDefinitionGroup>
+  <ClCompile><LanguageStandard>stdcpp20</LanguageStandard><ConformanceMode>true</ConformanceMode><WarningLevel>Level4</WarningLevel><RuntimeLibrary>MultiThreaded</RuntimeLibrary><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>NOMINMAX;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>windowsapp.lib;user32.lib;gdi32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  <Manifest><AdditionalManifestFiles>app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
+ </ItemDefinitionGroup>
+ <ItemGroup><ClCompile Include="Main.cpp"/><ClCompile Include="..\Capture\CaptureService.cpp"/><ClCompile Include="..\OCR\CoordinateRecognizer.cpp"/><ClCompile Include="..\Core\Calculator.cpp"/><ClInclude Include="..\Capture\CaptureService.h"/><ClInclude Include="..\OCR\CoordinateRecognizer.h"/><ClInclude Include="..\OCR\Glyphs.h"/><None Include="..\OCR\Geometric.inl"/><None Include="app.manifest"/></ItemGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+</Project>

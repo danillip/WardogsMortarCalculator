@@ -1,0 +1,1 @@
+namespace WardogsGameBar { [default_interface] runtimeclass MainWidget : Windows.UI.Xaml.Controls.Page { MainWidget(); } }

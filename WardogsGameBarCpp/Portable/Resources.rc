@@ -1,0 +1,3 @@
+#include "Resources.h"
+IDR_LOGO RCDATA "../GameBarWidget/Assets/logo.png"
+IDI_WARDOGS ICON "Assets/app.ico"

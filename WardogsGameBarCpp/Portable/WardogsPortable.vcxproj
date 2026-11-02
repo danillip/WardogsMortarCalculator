@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <ItemGroup Label="ProjectConfigurations">
+  <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+ </ItemGroup>
+ <PropertyGroup Label="Globals"><ProjectGuid>{4D7C0581-1843-4C1F-BCF0-10443405C504}</ProjectGuid><ProjectName>WardogsPortable</ProjectName><RootNamespace>WardogsPortable</RootNamespace><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+ <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><CharacterSet>Unicode</CharacterSet><UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries><UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+ <PropertyGroup><TargetName>WardogsPortable</TargetName><OutDir>$(ProjectDir)..\..\artifacts\$(Platform)\$(Configuration)\Portable\</OutDir><IntDir>$(ProjectDir)..\..\artifacts\obj\$(Platform)\$(Configuration)\Portable\</IntDir></PropertyGroup>
+ <ItemDefinitionGroup>
+  <ClCompile><LanguageStandard>stdcpp20</LanguageStandard><ConformanceMode>true</ConformanceMode><WarningLevel>Level4</WarningLevel><RuntimeLibrary>MultiThreaded</RuntimeLibrary><PrecompiledHeader>NotUsing</PrecompiledHeader><AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>windowsapp.lib;user32.lib;gdi32.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;ole32.lib;shell32.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies><GenerateDebugInformation>true</GenerateDebugInformation></Link>
+  <Manifest><AdditionalManifestFiles>app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
+ </ItemDefinitionGroup>
+ <ItemGroup>
+  <ClCompile Include="Main.cpp"/><ClCompile Include="OverlayWindow.cpp"/><ClCompile Include="PortableSettings.cpp"/>
+  <ClCompile Include="StartupCheck.cpp"/><ClInclude Include="StartupCheck.h"/>
+  <ClCompile Include="..\Core\Calculator.cpp"/><ClCompile Include="..\Capture\CaptureService.cpp"/><ClCompile Include="..\OCR\CoordinateRecognizer.cpp"/><ClCompile Include="..\Settings\SettingsModel.cpp"/>
+  <ClInclude Include="OverlayWindow.h"/><ClInclude Include="PortableSettings.h"/><ClInclude Include="Resources.h"/>
+  <ClInclude Include="..\Core\Calculator.h"/><ClInclude Include="..\Capture\CaptureService.h"/><ClInclude Include="..\OCR\CoordinateRecognizer.h"/><ClInclude Include="..\OCR\Glyphs.h"/><ClInclude Include="..\Settings\SettingsManager.h"/><ClInclude Include="..\Shared\WindowsIncludes.h"/>
+  <None Include="..\OCR\Geometric.inl"/><None Include="app.manifest"/><ResourceCompile Include="Resources.rc"/><Image Include="Assets\app.ico"/>
+ </ItemGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+</Project>

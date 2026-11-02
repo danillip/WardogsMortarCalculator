@@ -1,0 +1,15 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/Documentation/">
+    <File Path="README.md" />
+    <File Path=".gitignore" />
+    <File Path="LICENSE" />
+    <File Path="WardogsGameBarCpp/docs/BUILD.md" />
+  </Folder>
+  <Project Path="WardogsGameBarCpp/GameBarWidget/WardogsGameBar.vcxproj" Id="ba071b8c-ce66-4117-b014-867f72de4c10" />
+  <Project Path="WardogsGameBarCpp/Companion/WardogsCapture.vcxproj" Id="e56435c3-07d6-42e4-89d5-60b2b50ff412" />
+  <Project Path="WardogsGameBarCpp/Tests/CoreTests.vcxproj" Id="22998cbd-cbd3-462f-81ab-4981ad163976" />
+  <Project Path="WardogsGameBarCpp/Portable/WardogsPortable.vcxproj" Id="4d7c0581-1843-4c1f-bcf0-10443405c504" />
+</Solution>

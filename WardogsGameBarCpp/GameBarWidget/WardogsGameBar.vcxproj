@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')"/>
+ <PropertyGroup Label="Globals">
+  <ProjectGuid>{BA071B8C-CE66-4117-B014-867F72DE4C10}</ProjectGuid><ProjectName>WardogsGameBar</ProjectName><RootNamespace>WardogsGameBar</RootNamespace>
+  <CppWinRTOptimized>true</CppWinRTOptimized><CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+  <DefaultLanguage>ru-RU</DefaultLanguage><MinimumVisualStudioVersion>18.0</MinimumVisualStudioVersion>
+  <AppContainerApplication>true</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+  <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion>
+ </PropertyGroup>
+ <ItemGroup Label="ProjectConfigurations">
+  <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+ </ItemGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+ <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+ <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Debug'"><UseDebugLibraries>true</UseDebugLibraries></PropertyGroup>
+ <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Release'"><UseDebugLibraries>false</UseDebugLibraries><WholeProgramOptimization>true</WholeProgramOptimization></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+ <PropertyGroup>
+  <OutDir>$(ProjectDir)..\..\artifacts\$(Platform)\$(Configuration)\Widget\</OutDir><IntDir>$(ProjectDir)..\..\artifacts\obj\$(Platform)\$(Configuration)\Widget\</IntDir>
+  <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled><AppxBundle>Never</AppxBundle><GenerateAppInstallerFile>false</GenerateAppInstallerFile><AppxAutoIncrementPackageRevision>false</AppxAutoIncrementPackageRevision>
+  <DebuggerFlavor>AppHostLocalDebugger</DebuggerFlavor>
+  <AppxPackageDir>$(ProjectDir)..\..\artifacts\$(Platform)\$(Configuration)\MSIX\</AppxPackageDir>
+  <AppxPackageName>WardogsGameBar</AppxPackageName>
+  <AppxPackageExtension>.msix</AppxPackageExtension>
+  <AppxPackageTestDir>$(AppxPackageDir)</AppxPackageTestDir>
+  <AppxPackageOutput>$(AppxPackageDir)WardogsGameBar.msix</AppxPackageOutput>
+ </PropertyGroup>
+ <ItemDefinitionGroup>
+  <ClCompile><LanguageStandard>stdcpp20</LanguageStandard><ConformanceMode>true</ConformanceMode><PrecompiledHeader>NotUsing</PrecompiledHeader><WarningLevel>Level4</WarningLevel><AdditionalOptions>/utf-8 /bigobj /DWINRT_NO_MAKE_DETECTION %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  <Link><AdditionalDependencies>WindowsApp.lib;OneCore.lib;%(AdditionalDependencies)</AdditionalDependencies><SubSystem>Windows</SubSystem></Link>
+ </ItemDefinitionGroup>
+ <ItemGroup>
+  <ApplicationDefinition Include="App.xaml"/><Page Include="MainWidget.xaml"/>
+  <Midl Include="App.idl"/><Midl Include="MainWidget.idl"/>
+  <ClInclude Include="pch.h"/><ClInclude Include="App.h"/><ClInclude Include="MainWidget.h"/><ClInclude Include="CompanionBridge.h"/>
+  <ClInclude Include="..\Core\Calculator.h"/><ClInclude Include="..\Settings\SettingsManager.h"/><ClInclude Include="..\OCR\CoordinateRecognizer.h"/>
+  <ClInclude Include="..\OCR\Glyphs.h"/><None Include="..\OCR\Geometric.inl"/>
+  <ClCompile Include="App.cpp"/><ClCompile Include="MainWidget.cpp"/><ClCompile Include="CompanionBridge.cpp"/>
+  <ClCompile Include="..\Core\Calculator.cpp"/><ClCompile Include="..\Settings\SettingsManager.cpp"/><ClCompile Include="..\OCR\CoordinateRecognizer.cpp"/>
+  <ClCompile Include="..\Settings\SettingsModel.cpp"/>
+  <ClCompile Include="$(GeneratedFilesDir)module.g.cpp"/>
+  <AppxManifest Include="Package.appxmanifest"/><None Include="packages.config"/>
+  <SDKReference Include="WindowsDesktop, Version=10.0.26100.0"/>
+  <Image Include="Assets\*.png"/>
+  <Content Include="GameBar\README.txt"/>
+  <Content Include="..\..\artifacts\$(Platform)\$(Configuration)\Companion\WardogsCapture.exe"><Link>Companion\WardogsCapture.exe</Link><DeploymentContent>true</DeploymentContent></Content>
+  <ProjectReference Include="..\Companion\WardogsCapture.vcxproj"><Project>{E56435C3-07D6-42E4-89D5-60B2B50FF412}</Project><LinkLibraryDependencies>false</LinkLibraryDependencies><ReferenceOutputAssembly>false</ReferenceOutputAssembly><Private>false</Private></ProjectReference>
+ </ItemGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+ <ImportGroup Label="ExtensionTargets">
+  <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets')"/>
+  <Import Project="..\..\packages\Microsoft.Gaming.XboxGameBar.7.2.240903001\build\native\Microsoft.Gaming.XboxGameBar.targets" Condition="Exists('..\..\packages\Microsoft.Gaming.XboxGameBar.7.2.240903001\build\native\Microsoft.Gaming.XboxGameBar.targets')"/>
+ </ImportGroup>
+ <Target Name="EnsureNuGetPackages" BeforeTargets="PrepareForBuild">
+  <Error Condition="!Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets')" Text="Restore NuGet packages for WardorsMortalCalc.slnx first (Microsoft.Windows.CppWinRT)."/>
+  <Error Condition="!Exists('..\..\packages\Microsoft.Gaming.XboxGameBar.7.2.240903001\build\native\Microsoft.Gaming.XboxGameBar.targets')" Text="Restore NuGet packages for WardorsMortalCalc.slnx first (Microsoft.Gaming.XboxGameBar)."/>
+ </Target>
+</Project>
