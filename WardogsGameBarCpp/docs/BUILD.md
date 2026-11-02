@@ -14,6 +14,14 @@ artifacts/x64/Release/Portable/WardogsPortable.exe
 
 Для переноса нужен только EXE: CRT, логотип и значок включены в него. Настройки сохраняются рядом в `WardogsPortable.settings.json`, при отсутствии записи — в `%LOCALAPPDATA%\WardogsMortarCalculator`.
 
+Для подготовки релиза после пересборки выполните из корня проекта:
+
+```powershell
+powershell -NoProfile -File .\scripts\Prepare-PortableRelease.ps1
+```
+
+Готовые файлы появятся в `artifacts/releases/portable-v0.1.0/`: EXE, SHA-256 и лицензия. Скрипт не собирает и не запускает приложение; он проверяет версию, x64, актуальность EXE и наличие личных путей внутри файла. Настройки и отладочные файлы в релиз не копируются.
+
 ## Game Bar
 
 1. Восстановите NuGet-пакеты решения — они попадут в корневую папку `packages/`.
