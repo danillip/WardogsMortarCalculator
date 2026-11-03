@@ -12,7 +12,7 @@ using namespace winrt;
 namespace wardogs {
 namespace {
 constexpr UINT ScanDone=WM_APP+1;
-constexpr int Width=400,CombatHeight=220,SettingsHeight=515;
+constexpr int Width=400,AimHeight=165,CombatHeight=220+AimHeight,SettingsHeight=515+AimHeight;
 constexpr uint32_t Background=0x0b0f19,Panel=0x111827,Muted=0x64748b,Gray=0x94a3b8,White=0xf8fafc,Blue=0x38bdf8,Green=0x34d399,Yellow=0xfbbf24,Red=0xf87171;
 D2D1_RECT_F Rect(float x,float y,float width,float height){return D2D1::RectF(x,y,x+width,y+height);}
 bool Contains(D2D1_RECT_F r,float x,float y){return x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom;}
@@ -46,7 +46,7 @@ struct OverlayWindow::Surface {
 OverlayWindow::OverlayWindow():m_settings(m_store.Load()) {
     SetStatus(L"Наведите курсор на X/Y: F1 — орудие, F2 — цель",L"Hover over X/Y: F1 — mortar, F2 — target");
 }
-OverlayWindow::~OverlayWindow(){m_closing=true;StopScan();UnregisterKeys();if(m_window&&IsWindow(m_window)){SetWindowLongPtrW(m_window,GWLP_USERDATA,0);DestroyWindow(m_window);}m_window=nullptr;m_renderTarget=nullptr;m_surface.reset();}
+OverlayWindow::~OverlayWindow(){m_closing=true;m_aim.Shutdown();StopScan();UnregisterKeys();if(m_window&&IsWindow(m_window)){SetWindowLongPtrW(m_window,GWLP_USERDATA,0);DestroyWindow(m_window);}m_window=nullptr;m_renderTarget=nullptr;m_surface.reset();}
 std::wstring OverlayWindow::Tr(wchar_t const* ru,wchar_t const* en)const{return m_settings.common.english?en:ru;}
 void OverlayWindow::SetStatus(std::wstring ru,std::wstring en,bool error) {
     m_statusRu=std::move(ru);m_statusEn=std::move(en);m_statusError=error;
@@ -57,7 +57,7 @@ int OverlayWindow::Run(HINSTANCE instance,int) {
     if(!RegisterClassExW(&klass))throw_last_error();
     m_window=CreateWindowExW(WS_EX_LAYERED|WS_EX_TOOLWINDOW,klass.lpszClassName,L"WARDOGS Mortar Calculator",WS_POPUP,m_settings.x,m_settings.y,Width,CombatHeight,nullptr,nullptr,instance,this);
     if(!m_window)throw_last_error();
-    m_scale=GetDpiForWindow(m_window)/96.f;InitializeGraphics();LoadLogo();
+    m_scale=GetDpiForWindow(m_window)/96.f;InitializeGraphics();LoadLogo();m_aim.Initialize(m_window);
     if(!RegisterKeys())m_edit=true; // Keep settings reachable if F3 cannot register.
     Resize();ClampPosition();ApplyWindowStyle();ShowWindow(m_window,m_edit?SW_SHOW:SW_SHOWNOACTIVATE);Paint();
     MSG message{};BOOL status;
@@ -123,7 +123,18 @@ void OverlayWindow::Paint() {
     }
     if(m_settings.common.preview){Fill(Rect(310,111,64,48),Panel);Text(L"OCR",Rect(326,125,40,18),Muted,m_smallFormat.get());DrawImage(m_preview,Rect(310,111,64,48));}
     Text(m_settings.common.english?m_statusEn:m_statusRu,Rect(12,177,376,34),m_statusError?Red:Muted,m_smallFormat.get());
+    Fill(Rect(10,215,380,162),Panel);Outline(Rect(10,215,380,162),0x1e293b);
+    Text(Tr(L"ПОДСКАЗКА ПРИЦЕЛА",L"SIGHT RANGE HINT"),Rect(20,222,355,18),m_aim.Tracking()?Green:Blue,m_smallFormat.get());
+    Fill(Rect(20,245,76,122),Background);
+    if(m_settings.common.preview){
+        DrawImage(m_aim.Preview(),Rect(20,245,76,122));
+        if(auto mark=m_aim.PreviewMark())Fill(Rect(20,245+static_cast<float>(*mark)*122,76,2),Blue);
+    }
+    Text(m_aim.Status(m_settings.common.english),Rect(108,245,267,66),Gray);
+    Text(L"F5",Rect(108,320,76,25),Blue);Text(L"F6",Rect(190,320,76,25),m_aim.Tracking()?Green:Blue);Text(L"F7",Rect(272,320,76,25),Blue);
+    Text(Tr(L"Проверка / сопровождение / убрать",L"Check / track / clear"),Rect(108,351,270,23),Muted,m_smallFormat.get());
     if(m_edit){
+        m_renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(0,AimHeight)*D2D1::Matrix3x2F::Scale(m_scale,m_scale));
         Fill(Rect(10,223,380,280),Panel);
         Button(L"RU",Rect(20,232,40,25),!m_settings.common.english);Button(L"EN",Rect(65,232,40,25),m_settings.common.english);Button(Tr(L"Применить X/Y",L"Apply X/Y"),Rect(235,232,145,25));
         Text(Tr(L"Непрозрачность",L"Opacity"),Rect(20,267,115,20),Gray);Fill(Rect(143,274,180,4),0x0b0f19);Fill(Rect(143+static_cast<float>((m_settings.common.opacity-.2)/.8)*180-3,266,6,20),Blue);Text(std::format(L"{:.0f}%",m_settings.common.opacity*100),Rect(333,267,48,20),Blue);
@@ -133,6 +144,7 @@ void OverlayWindow::Paint() {
         Text(Tr(L"Клавиши: нажмите ячейку, затем сочетание",L"Hotkeys: click a cell, then press the combination"),Rect(20,381,360,18),Muted,m_smallFormat.get());
         for(int i=0;i<4;++i){auto rect=KeyRect(i);std::wstring label=i==0?Tr(L"Орудие",L"Mortar"):i==1?Tr(L"Цель",L"Target"):i==2?Tr(L"Настр.",L"Setup"):Tr(L"Скрыть",L"Hide");Text(label,Rect(rect.left-58,rect.top+5,56,20),Gray,m_smallFormat.get());Button(m_rebinding==i?L"… Esc":m_settings.common.hotkeys[i],rect,m_rebinding==i);}
         Text(Tr(L"Перетаскивайте заголовок. F3 — вернуться в HUD.",L"Drag the header. F3 returns to the HUD."),Rect(20,474,360,24),Muted,m_smallFormat.get());
+        m_renderTarget->SetTransform(D2D1::Matrix3x2F::Scale(m_scale,m_scale));
     }
     auto result=m_renderTarget->EndDraw();if(result==D2DERR_RECREATE_TARGET){m_renderTarget=nullptr;InvalidateRect(m_window,nullptr,FALSE);return;}check_hresult(result);
     RECT window{};GetWindowRect(m_window,&window);POINT destination{window.left,window.top},source{};SIZE size{width,height};BLENDFUNCTION blend{AC_SRC_OVER,0,static_cast<BYTE>(std::lround(m_settings.common.opacity*255)),AC_SRC_ALPHA};
@@ -142,7 +154,13 @@ void OverlayWindow::Save() {
     try{RECT window{};GetWindowRect(m_window,&window);m_settings.x=window.left;m_settings.y=window.top;m_store.Save(m_settings);}
     catch(...){SetStatus(L"Не удалось сохранить настройки",L"Could not save settings",true);}
 }
-void OverlayWindow::Resize(){SetWindowPos(m_window,nullptr,0,0,static_cast<int>(Width*m_scale),static_cast<int>((m_edit?SettingsHeight:CombatHeight)*m_scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);InvalidateRect(m_window,nullptr,FALSE);}
+void OverlayWindow::Resize(){
+    m_scale=GetDpiForWindow(m_window)/96.f;
+    MONITORINFO monitor{sizeof(monitor)};
+    if(GetMonitorInfoW(MonitorFromWindow(m_window,MONITOR_DEFAULTTONEAREST),&monitor))
+        m_scale=std::min(m_scale,std::max(.5f,(monitor.rcWork.bottom-monitor.rcWork.top-20.f)/SettingsHeight));
+    SetWindowPos(m_window,nullptr,0,0,static_cast<int>(Width*m_scale),static_cast<int>((m_edit?SettingsHeight:CombatHeight)*m_scale),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);InvalidateRect(m_window,nullptr,FALSE);
+}
 void OverlayWindow::ClampPosition() {
     RECT window{};GetWindowRect(m_window,&window);MONITORINFO info{sizeof(info)};
     if(GetMonitorInfoW(MonitorFromRect(&window,MONITOR_DEFAULTTONEAREST),&info)){int x=std::clamp(window.left,info.rcWork.left,std::max(info.rcWork.left,info.rcWork.right-(window.right-window.left)));int y=std::clamp(window.top,info.rcWork.top,std::max(info.rcWork.top,info.rcWork.bottom-(window.bottom-window.top)));SetWindowPos(m_window,nullptr,x,y,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);}
@@ -154,6 +172,7 @@ void OverlayWindow::ApplyWindowStyle() {
     SetWindowPos(m_window,m_settings.topmost?HWND_TOPMOST:HWND_NOTOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_FRAMECHANGED);
 }
 void OverlayWindow::ToggleEdit() {
+    m_aim.Clear();
     if(m_rebinding>=0){m_rebinding=-1;RegisterKeys();}
     if(m_hidden){m_hidden=false;ShowWindow(m_window,SW_SHOWNOACTIVATE);}
     if(m_edit)ApplyManual();m_edit=!m_edit;m_activeField=-1;m_selectAll=false;Resize();ClampPosition();ApplyWindowStyle();
@@ -161,13 +180,15 @@ void OverlayWindow::ToggleEdit() {
 }
 void OverlayWindow::ToggleHidden() {
     if(!m_registered[3]){SetStatus(L"Назначьте свободную клавишу возврата HUD",L"Bind an available HUD restore hotkey first",true);return;}
-    m_hidden=!m_hidden;ShowWindow(m_window,m_hidden?SW_HIDE:SW_SHOWNOACTIVATE);if(!m_hidden)InvalidateRect(m_window,nullptr,FALSE);
+    m_aim.Clear();m_hidden=!m_hidden;ShowWindow(m_window,m_hidden?SW_HIDE:SW_SHOWNOACTIVATE);if(!m_hidden)InvalidateRect(m_window,nullptr,FALSE);
 }
-void OverlayWindow::UnregisterKeys() noexcept {if(!m_window)return;for(int i=0;i<4;++i){UnregisterHotKey(m_window,1+i);m_registered[i]=false;}}
+void OverlayWindow::UnregisterKeys() noexcept {if(!m_window)return;for(int i=0;i<7;++i){UnregisterHotKey(m_window,1+i);m_registered[i]=false;}}
 bool OverlayWindow::RegisterKeys() {
     UnregisterKeys();bool success=true;
+    // Reserve sight actions before registering the configurable coordinate keys.
+    for(int i=4;i<7;++i){m_registered[i]=RegisterHotKey(m_window,i+1,MOD_NOREPEAT,VK_F5+i-4)!=FALSE;if(!m_registered[i])success=false;}
     for(int i=0;i<4;++i){try{auto key=NativeHotkey(m_settings.common.hotkeys[i]);m_registered[i]=RegisterHotKey(m_window,i+1,key.modifiers,key.key)!=FALSE;}catch(...){m_registered[i]=false;}if(!m_registered[i])success=false;}
-    if(!success)SetStatus(L"Конфликт горячих клавиш. F12 зарезервирована Windows. Измените сочетания в настройках.",L"Hotkey conflict. F12 is reserved by Windows. Rebind the affected shortcuts in settings.",true);
+    if(!success)SetStatus(L"Конфликт клавиш. F5–F7 нужны прицелу, F12 — Windows. Освободите клавиши или измените сочетания.",L"Hotkey conflict. F5–F7 are for sight hints; F12 is reserved. Free these keys or rebind shortcuts.",true);
     return success;
 }
 void OverlayWindow::ApplyManual() {
@@ -175,15 +196,23 @@ void OverlayWindow::ApplyManual() {
     std::array<std::optional<double>,4> values;for(int i=0;i<4;++i)values[i]=ParseManualCoordinate(m_fields[i]);
     bool gun=!m_fields[0].empty()||!m_fields[1].empty(),target=!m_fields[2].empty()||!m_fields[3].empty();
     if((gun&&(!values[0]||!values[1]))||(target&&(!values[2]||!values[3]))){SetStatus(L"Введите обе координаты X/Y от 0 до 999.99",L"Enter both X/Y coordinates from 0 to 999.99",true);return;}
-    if(gun)m_gun=Coordinates{*values[0],*values[1]};if(target)m_target=Coordinates{*values[2],*values[3]};Recalculate();
+    m_aim.Clear();m_gun.reset();m_target.reset();if(gun)m_gun=Coordinates{*values[0],*values[1]};if(target)m_target=Coordinates{*values[2],*values[3]};Recalculate();
 }
 void OverlayWindow::Recalculate() {
-    if(!m_gun||!m_target)return;auto result=CalculateBallistics(*m_gun,*m_target);
+    if(!m_gun||!m_target){m_azimuth=L"---.-°";m_elevation=L"--- mil";m_distance=L"---";m_rangeError=false;InvalidateRect(m_window,nullptr,FALSE);return;}auto result=CalculateBallistics(*m_gun,*m_target);
     m_azimuth=std::format(L"{:05.1f}°",result.azimuth_deg);m_distance=std::format(L"{:.0f} {}",result.distance_m,m_settings.common.english?L"m":L"м");
     m_rangeError=!result.elevation_mil;m_elevation=result.elevation_mil?std::format(L"{:.0f} mil",*result.elevation_mil):(result.range_status==RangeStatus::TooClose?L"<80!":L">684!");InvalidateRect(m_window,nullptr,FALSE);
 }
+void OverlayWindow::RequestAim(bool tracking) {
+    if(m_closing||m_hidden||m_edit)return;
+    if(m_job){SetStatus(L"Дождитесь распознавания координат",L"Wait for coordinate OCR to finish",true);return;}
+    if(!m_gun||!m_target){SetStatus(L"Сначала считайте орудие и цель: F1/F2",L"Read mortar and target first: F1/F2",true);return;}
+    auto result=CalculateBallistics(*m_gun,*m_target);
+    m_aim.Request(tracking,result.elevation_mil.value_or(0),result.distance_m);
+}
 void OverlayWindow::StartScan(bool target) {
     if(m_job||m_closing)return;
+    m_aim.Clear();
     m_activeField=-1;m_selectAll=false;
     SetStatus(target?L"Сканирование ЦЕЛИ…":L"Сканирование ОРУДИЯ…",target?L"Scanning TARGET…":L"Scanning MORTAR…");
     // Capture at the command, before scheduling OCR. No repeating capture thread.
@@ -238,6 +267,9 @@ void OverlayWindow::Click(float x,float y) {
     if(!m_edit)return;
     if(Contains(Rect(370,8,20,25),x,y)){SendMessageW(m_window,WM_CLOSE,0,0);return;}
     if(y<35){ReleaseCapture();SendMessageW(m_window,WM_NCLBUTTONDOWN,HTCAPTION,0);return;}
+    // Sight buttons are labels in setup; capture must be requested with the game focused.
+    if(y>=215&&y<215+AimHeight)return;
+    if(y>=215+AimHeight)y-=AimHeight;
     if(m_statusError&&Contains(Rect(12,177,376,34),x,y)){MessageBoxW(m_window,(m_settings.common.english?m_statusEn:m_statusRu).c_str(),L"WARDOGS Portable",MB_OK|MB_ICONINFORMATION);return;}
     for(int i=0;i<4;++i)if(Contains(FieldRect(i),x,y)){if(m_rebinding>=0){m_rebinding=-1;RegisterKeys();}m_activeField=i;m_caret=m_fields[i].size();m_selectAll=true;SetFocus(m_window);InvalidateRect(m_window,nullptr,FALSE);return;}
     m_activeField=-1;m_selectAll=false;
@@ -255,6 +287,9 @@ void OverlayWindow::Click(float x,float y) {
 void OverlayWindow::BindKey(WPARAM key) {
     if(key==VK_ESCAPE){m_rebinding=-1;RegisterKeys();InvalidateRect(m_window,nullptr,FALSE);return;}
     if(key==VK_CONTROL||key==VK_SHIFT||key==VK_MENU||key==VK_LWIN||key==VK_RWIN)return;
+    if(key>=VK_F5&&key<=VK_F7&&!(GetKeyState(VK_CONTROL)&0x8000)&&!(GetKeyState(VK_SHIFT)&0x8000)&&!(GetKeyState(VK_MENU)&0x8000)){
+        SetStatus(L"F5–F7 заняты подсказкой прицела. Выберите другое сочетание.",L"F5–F7 are used by sight hints. Choose another shortcut.",true);return;
+    }
     if((GetKeyState(VK_LWIN)&0x8000)||(GetKeyState(VK_RWIN)&0x8000)){SetStatus(L"Сочетания с Win зарезервированы системой",L"Windows-key combinations are reserved by the system",true);return;}
     std::wstring name;
     if(GetKeyState(VK_CONTROL)&0x8000)name+=L"CTRL+";if(GetKeyState(VK_SHIFT)&0x8000)name+=L"SHIFT+";if(GetKeyState(VK_MENU)&0x8000)name+=L"ALT+";
@@ -303,7 +338,9 @@ LRESULT OverlayWindow::HandleMessage(UINT message,WPARAM wParam,LPARAM lParam) {
     switch(message){
     case WM_PAINT:{PAINTSTRUCT paint{};BeginPaint(m_window,&paint);EndPaint(m_window,&paint);Paint();return 0;}
     case WM_ERASEBKGND:return 1;
-    case WM_HOTKEY:if(m_closing)return 0;if(wParam==1||wParam==2)StartScan(wParam==2);else if(wParam==3)ToggleEdit();else if(wParam==4)ToggleHidden();return 0;
+    case WM_HOTKEY:if(m_closing)return 0;if(wParam==1||wParam==2)StartScan(wParam==2);else if(wParam==3)ToggleEdit();else if(wParam==4)ToggleHidden();else if(wParam==5)RequestAim(false);else if(wParam==6)RequestAim(true);else if(wParam==7)m_aim.Clear();return 0;
+    case WM_TIMER:if(wParam==AimAssist::TimerId){m_aim.Tick();return 0;}break;
+    case AimAssist::ResultMessage:m_aim.Finish(static_cast<uint64_t>(wParam));return 0;
     case WM_LBUTTONDOWN:Click(GET_X_LPARAM(lParam)/m_scale,GET_Y_LPARAM(lParam)/m_scale);return 0;
     case WM_MOUSEMOVE:if(m_slider)Slider(GET_X_LPARAM(lParam)/m_scale);return 0;
     case WM_LBUTTONUP:if(m_slider){m_slider=0;ReleaseCapture();Save();}return 0;
@@ -314,10 +351,10 @@ LRESULT OverlayWindow::HandleMessage(UINT message,WPARAM wParam,LPARAM lParam) {
     case WM_NCHITTEST:if(!m_edit&&m_settings.clickThrough)return HTTRANSPARENT;break;
     case WM_MOUSEACTIVATE:if(!m_edit)return MA_NOACTIVATE;break;
     case WM_EXITSIZEMOVE:Save();return 0;
-    case WM_DISPLAYCHANGE:ClampPosition();InvalidateRect(m_window,nullptr,FALSE);return 0;
-    case WM_DPICHANGED:{m_scale=HIWORD(wParam)/96.f;auto suggested=reinterpret_cast<RECT*>(lParam);SetWindowPos(m_window,nullptr,suggested->left,suggested->top,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);Resize();ClampPosition();return 0;}
+    case WM_DISPLAYCHANGE:m_aim.Clear();ClampPosition();InvalidateRect(m_window,nullptr,FALSE);return 0;
+    case WM_DPICHANGED:{m_aim.Clear();m_scale=HIWORD(wParam)/96.f;auto suggested=reinterpret_cast<RECT*>(lParam);SetWindowPos(m_window,nullptr,suggested->left,suggested->top,0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);Resize();ClampPosition();return 0;}
     case ScanDone:FinishScan();return 0;
-    case WM_CLOSE:if(m_closing)return 0;m_closing=true;UnregisterKeys();StopScan();Save();DestroyWindow(m_window);return 0;
+    case WM_CLOSE:if(m_closing)return 0;m_closing=true;m_aim.Shutdown();UnregisterKeys();StopScan();Save();DestroyWindow(m_window);return 0;
     case WM_DESTROY:PostQuitMessage(0);return 0;
     case WM_NCDESTROY:{auto window=m_window;SetWindowLongPtrW(window,GWLP_USERDATA,0);m_window=nullptr;return DefWindowProcW(window,message,wParam,lParam);}
     }

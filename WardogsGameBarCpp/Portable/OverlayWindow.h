@@ -1,6 +1,7 @@
 #pragma once
 #include "../Shared/WindowsIncludes.h"
 #include "PortableSettings.h"
+#include "AimAssist.h"
 #include "../OCR/CoordinateRecognizer.h"
 #include <d2d1.h>
 #include <dwrite.h>
@@ -53,6 +54,7 @@ private:
     void Save();
     void SetStatus(std::wstring ru,std::wstring en,bool error=false);
     void Recalculate();
+    void RequestAim(bool tracking);
     std::wstring Tr(wchar_t const* ru,wchar_t const* en) const;
     HWND m_window{};
     float m_scale=1;
@@ -60,7 +62,7 @@ private:
     int m_activeField=-1,m_rebinding=-1,m_slider=0;
     size_t m_caret=0;
     bool m_selectAll=false;
-    std::array<bool,4> m_registered{};
+    std::array<bool,7> m_registered{};
     std::array<std::wstring,4> m_fields;
     std::optional<Coordinates> m_gun,m_target;
     std::wstring m_statusRu,m_statusEn,m_azimuth=L"---.-°",m_elevation=L"--- mil",m_distance=L"---";
@@ -68,6 +70,7 @@ private:
     PortableSettingsStore m_store;
     OverlaySettings m_settings;
     Image m_preview,m_logo;
+    AimAssist m_aim;
     std::shared_ptr<ScanJob> m_job;
     std::jthread m_worker;
     winrt::com_ptr<ID2D1Factory> m_factory;

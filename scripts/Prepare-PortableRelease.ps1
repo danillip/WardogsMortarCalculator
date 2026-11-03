@@ -2,7 +2,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$version = '0.1.0'
+$version = '0.2.0'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $exePath = Join-Path $repoRoot 'artifacts/x64/Release/Portable/WardogsPortable.exe'
 if (-not (Test-Path -LiteralPath $exePath)) {

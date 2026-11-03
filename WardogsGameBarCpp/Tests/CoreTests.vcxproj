@@ -7,6 +7,6 @@
  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
  <PropertyGroup><OutDir>$(ProjectDir)..\..\artifacts\$(Platform)\$(Configuration)\Tests\</OutDir><IntDir>$(ProjectDir)..\..\artifacts\obj\$(Platform)\$(Configuration)\Tests\</IntDir></PropertyGroup>
  <ItemDefinitionGroup><ClCompile><LanguageStandard>stdcpp20</LanguageStandard><ConformanceMode>true</ConformanceMode><WarningLevel>Level4</WarningLevel><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
- <ItemGroup><ClCompile Include="CoreTests.cpp"/><ClCompile Include="..\Core\Calculator.cpp"/><ClInclude Include="..\Core\Calculator.h"/></ItemGroup>
+ <ItemGroup><ClCompile Include="CoreTests.cpp"/><ClCompile Include="..\Core\Calculator.cpp"/><ClInclude Include="..\Core\Calculator.h"/><ClCompile Include="..\Core\SightScale.cpp"/><ClInclude Include="..\Core\SightScale.h"/></ItemGroup>
  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
 </Project>

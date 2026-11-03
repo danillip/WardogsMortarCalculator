@@ -4,8 +4,8 @@ IDR_LOGO RCDATA "../GameBarWidget/Assets/logo.png"
 IDI_WARDOGS ICON "Assets/app.ico"
 
 1 VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 0,2,0,0
+ PRODUCTVERSION 0,2,0,0
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
  FILEFLAGS 0
  FILEOS VOS_NT_WINDOWS32
@@ -17,11 +17,11 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "FileDescription", "WARDOGS Mortar Calculator Portable\0"
-            VALUE "FileVersion", "0.1.0.0\0"
+            VALUE "FileVersion", "0.2.0.0\0"
             VALUE "InternalName", "WardogsPortable\0"
             VALUE "OriginalFilename", "WardogsPortable.exe\0"
             VALUE "ProductName", "WARDOGS Mortar Calculator\0"
-            VALUE "ProductVersion", "0.1.0\0"
+            VALUE "ProductVersion", "0.2.0\0"
             VALUE "LegalCopyright", "Based on WARDOGS Mortar Calculator, Copyright (c) 2026 ProDexortie. MIT License.\0"
         END
     END
