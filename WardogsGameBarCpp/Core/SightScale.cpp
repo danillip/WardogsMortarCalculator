@@ -43,4 +43,32 @@ std::optional<SightSolution> LocateSightMark(std::vector<SightLabel> const& labe
     const double y=intercept+slope*targetMil;
     return SightSolution{y,meanX,first,last,y<first?SightDirection::IncreaseRange:y>last?SightDirection::DecreaseRange:SightDirection::Visible};
 }
+std::optional<SightSolution> LocateSightWithText(std::vector<SightLabel> const& ticks,
+    std::vector<SightLabel> const& text,double targetMil,double pixelsPerMil,double tolerance) {
+    if(auto direct=LocateSightMark(ticks,targetMil,pixelsPerMil,tolerance))return direct;
+    if(text.size()<3||ticks.empty()||!std::isfinite(tolerance)||tolerance<=0)return {};
+    // Word boxes sit slightly above/below the actual horizontal stroke. Use a
+    // detected tick to measure that offset; never assume the OCR centre is exact.
+    for(auto tick:ticks)for(auto anchor:text) {
+        if(tick.distance!=anchor.distance||!std::isfinite(tick.y)||!std::isfinite(tick.tickX)||
+           !std::isfinite(anchor.y)||!std::isfinite(anchor.tickX)||
+           std::abs(tick.y-anchor.y)>tolerance*2||std::abs(tick.tickX-anchor.tickX)>tolerance*4)continue;
+        std::vector<SightLabel> aligned;
+        for(auto label:text) {
+            if(std::abs(label.tickX-anchor.tickX)>tolerance*2)continue;
+            aligned.push_back({label.distance,label.y+(tick.y-anchor.y),tick.tickX});
+        }
+        auto mark=LocateSightMark(aligned,targetMil,pixelsPerMil,tolerance);
+        if(!mark||tick.y<mark->firstY-tolerance||tick.y>mark->lastY+tolerance)continue;
+        bool consistent=true;
+        for(auto check:ticks) {
+            auto node=std::find_if(MortarTable.begin(),MortarTable.end(),[&](auto pair){return pair.first==check.distance;});
+            if(node==MortarTable.end()||!std::isfinite(check.y)||!std::isfinite(check.tickX)){consistent=false;break;}
+            auto predicted=LocateSightMark(aligned,node->second,pixelsPerMil,tolerance);
+            if(!predicted||std::abs(predicted->y-check.y)>tolerance||std::abs(check.tickX-tick.tickX)>tolerance*2){consistent=false;break;}
+        }
+        if(consistent){mark->textAnchored=true;return mark;}
+    }
+    return {};
+}
 }

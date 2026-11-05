@@ -21,11 +21,13 @@ std::pair<std::wstring,std::wstring> SightFailure(SightOutput const& output) {
         if(!values.empty())values+=L", ";values+=std::format(L"{:.0f}",label.distance);seen.push_back(label.distance);
         if(seen.size()==5)break;
     }
-    if(output.labels.size()<3)return {
-        std::format(L"OCR: {}. Найдено рисок: {}/3. F5 — повторить.",values,output.labels.size()),
-        std::format(L"OCR: {}. Ticks found: {}/3. F5 retries.",values,output.labels.size())};
-    return {L"OCR: "+values+L". Деления не согласованы. F5 — повторить.",
-        L"OCR: "+values+L". Scale geometry does not match. F5 retries."};
+    if(seen.size()<3)return {
+        std::format(L"OCR: {}. Подписи: {}/3, штрихи: {}. F5 — повторить.",values,seen.size(),output.labels.size()),
+        std::format(L"OCR: {}. Labels: {}/3, strokes: {}. F5 retries.",values,seen.size(),output.labels.size())};
+    if(output.labels.empty())return {L"OCR: "+values+L". Не найден штрих для привязки. F5 — повторить.",
+        L"OCR: "+values+L". No tick to anchor the mark. F5 retries."};
+    return {L"OCR: "+values+L". Привязка шкалы не совпала. F5 — повторить.",
+        L"OCR: "+values+L". Scale alignment does not match. F5 retries."};
 }
 }
 AimAssist::~AimAssist(){Shutdown();}
@@ -175,7 +177,7 @@ void AimAssist::Finish(uint64_t generation) {
     if(!job->error.empty()||!job->output) {
         Clear();SetStatus(L"Windows OCR недоступен для прицела",L"Windows OCR is unavailable for the sight");return;
     }
-    auto solution=LocateSightMark(job->output->labels,m_mil,102.*m_scale/50.,std::max(2.,3.*m_scale));
+    auto solution=LocateSightWithText(job->output->labels,job->output->textLabels,m_mil,102.*m_scale/50.,std::max(2.,3.*m_scale));
     m_preview=std::move(job->output->preview);
     if(!solution) {
         HideMark();++m_failures;
@@ -196,8 +198,10 @@ void AimAssist::Finish(uint64_t generation) {
     }
     try {
         DrawMark(*solution);
-        SetStatus(m_tracking?L"Сопровождение включено. Совместите риску с центром.":L"Разовая риска. После прокрутки обновите F5.",
-            m_tracking?L"Tracking on. Align the mark with the sight centre.":L"Snapshot mark. Press F5 again after adjusting.");
+        std::wstring ru=m_tracking?L"Сопровождение включено. Совместите риску с центром.":L"Разовая риска. После прокрутки обновите F5.";
+        std::wstring en=m_tracking?L"Tracking on. Align the mark with the sight centre.":L"Snapshot mark. Press F5 again after adjusting.";
+        if(solution->textAnchored){ru+=L" Привязка по цифрам и штриху.";en+=L" Anchored by labels and a tick.";}
+        SetStatus(std::move(ru),std::move(en));
     }catch(...){Clear();SetStatus(L"Не удалось вывести риску",L"Could not display the mark");}
 }
 }

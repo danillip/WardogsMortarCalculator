@@ -70,6 +70,28 @@ std::optional<std::pair<double,double>> FindTick(Image const& mask,double expect
         if(score<bestScore){bestScore=score;best=std::pair<double,double>{x,static_cast<double>(y)};}
         x=right;
     }
+    if(best)return best;
+    // A tick touching a wall/roof edge is not an isolated horizontal run.
+    // Score its T shape instead, allowing a few antialiasing gaps. Keep the
+    // vertical stem and clear flanks mandatory to reject solid scenery patches.
+    const int arm=std::max(8,static_cast<int>(std::lround(18*scale)));
+    const int reach=std::max(3,static_cast<int>(std::lround(6*scale)));
+    const int x0=std::max(0,static_cast<int>(expectedX-5*scale));
+    const int x1=std::min(mask.width-arm-2,static_cast<int>(expectedX+5*scale));
+    for(int y=std::max(top,reach);y<=std::min(bottom,mask.height-reach-1);++y)for(int x=x0;x<=x1;++x) {
+        int horizontal=0,vertical=0,clear=0;
+        for(int k=1;k<=arm;++k)if(Dark(mask,x+k,y)||Dark(mask,x+k,y-1)||Dark(mask,x+k,y+1))++horizontal;
+        for(int column=x;column<=x+2;++column) {
+            int hits=0;for(int dy=-reach;dy<=reach;++dy)if(Dark(mask,column,y+dy))++hits;
+            vertical=std::max(vertical,hits);
+        }
+        for(int k=3;k<=arm;++k){if(!Dark(mask,x+k,y-reach))++clear;if(!Dark(mask,x+k,y+reach))++clear;}
+        const double h=static_cast<double>(horizontal)/arm,v=static_cast<double>(vertical)/(reach*2+1);
+        const double flank=static_cast<double>(clear)/((arm-2)*2);
+        if(h<.8||v<.65||flank<.4)continue;
+        const double score=(1-h)*5+(1-v)*3+(1-flank)+std::abs(y-textY)*.2+std::abs(x-expectedX)*.1;
+        if(score<bestScore){bestScore=score;best=std::pair<double,double>{x,static_cast<double>(y)};}
+    }
     return best;
 }
 std::optional<double> ReadDistance(std::wstring text) {
@@ -160,7 +182,7 @@ winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,std::sh
         auto prepared=Prepare(source,left,right,factor,[cancel]{return cancel();});
         auto recognized=co_await engine.RecognizeAsync(ToBitmap(prepared));
         if(cancel())throw hresult_canceled();ReadLabels(recognized,mask,factor,expectedTickX,scale,*output);
-        if(LocateSightMark(output->labels,550,102*scale/50.,std::max(2.,3*scale)))break;
+        if(LocateSightWithText(output->labels,output->textLabels,550,102*scale/50.,std::max(2.,3*scale)))break;
     }
 }
 }
