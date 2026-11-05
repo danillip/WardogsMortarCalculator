@@ -11,6 +11,22 @@ bool ClientOnScreen(HWND window,RECT& rect) {
     POINT origin{};if(!ClientToScreen(window,&origin))return false;
     OffsetRect(&rect,origin.x,origin.y);return rect.right-rect.left>=640&&rect.bottom-rect.top>=480;
 }
+std::pair<std::wstring,std::wstring> SightFailure(SightOutput const& output) {
+    if(output.textLabels.empty())return {L"OCR не прочитал цифры шкалы. F5 — повторить.",L"OCR could not read the range labels. Press F5 to retry."};
+    auto labels=output.textLabels;
+    std::sort(labels.begin(),labels.end(),[](auto a,auto b){return a.y<b.y;});
+    std::wstring values;std::vector<double> seen;
+    for(auto label:labels) {
+        if(std::find(seen.begin(),seen.end(),label.distance)!=seen.end())continue;
+        if(!values.empty())values+=L", ";values+=std::format(L"{:.0f}",label.distance);seen.push_back(label.distance);
+        if(seen.size()==5)break;
+    }
+    if(output.labels.size()<3)return {
+        std::format(L"OCR: {}. Найдено рисок: {}/3. F5 — повторить.",values,output.labels.size()),
+        std::format(L"OCR: {}. Ticks found: {}/3. F5 retries.",values,output.labels.size())};
+    return {L"OCR: "+values+L". Деления не согласованы. F5 — повторить.",
+        L"OCR: "+values+L". Scale geometry does not match. F5 retries."};
+}
 }
 AimAssist::~AimAssist(){Shutdown();}
 void AimAssist::Shutdown() noexcept {Clear();if(m_marker)DestroyWindow(m_marker);m_marker=nullptr;m_owner=nullptr;}
@@ -163,9 +179,12 @@ void AimAssist::Finish(uint64_t generation) {
     m_preview=std::move(job->output->preview);
     if(!solution) {
         HideMark();++m_failures;
+        auto [ru,en]=SightFailure(*job->output);
         if(!m_tracking){m_active=false;KillTimer(m_owner,TimerId);}
-        if(m_tracking&&m_failures>=3){Clear();SetStatus(L"Шкала пропала: сопровождение остановлено",L"Scale lost: tracking stopped");}
-        else SetStatus(L"Не найдены 3 деления. Откройте прицел L81 и повторите F5",L"Need 3 readable ticks. Open the L81 sight and press F5 again");
+        if(m_tracking&&m_failures>=3){
+            auto preview=std::move(m_preview);Clear();m_preview=std::move(preview);
+            SetStatus(L"Сопровождение остановлено. "+ru,L"Tracking stopped. "+en);
+        }else SetStatus(std::move(ru),std::move(en));
         return;
     }
     m_failures=0;

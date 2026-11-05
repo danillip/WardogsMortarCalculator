@@ -3,71 +3,128 @@
 #include <winrt/Windows.Globalization.h>
 #include <cwctype>
 #include <functional>
-#include <regex>
 
 using namespace winrt;
 namespace wardogs {
 namespace {
-bool Dark(Image const& image,int x,int y) {
-    const auto p=image.bgra.data()+(static_cast<size_t>(y)*image.width+x)*4;
-    return std::max({p[0],p[1],p[2]})<100;
+using Cancelled=std::function<bool()>;
+
+// Local contrast retains black lettering on dark walls. A fixed threshold of
+// 100 merged the lettering and much of the scenery into one black component.
+Image InkMask(Image const& image,Cancelled const& cancelled) {
+    const int width=image.width,height=image.height,stride=width+1;
+    std::vector<int> gray(static_cast<size_t>(width)*height);
+    std::vector<int64_t> integral(static_cast<size_t>(stride)*(height+1));
+    for(int y=0;y<height;++y) {
+        if(cancelled())throw hresult_canceled();
+        int64_t row=0;
+        for(int x=0;x<width;++x) {
+            auto pixel=image.bgra.data()+(static_cast<size_t>(y)*width+x)*4;
+            const int value=(pixel[0]*29+pixel[1]*150+pixel[2]*77)/256;
+            gray[static_cast<size_t>(y)*width+x]=value;row+=value;
+            integral[static_cast<size_t>(y+1)*stride+x+1]=integral[static_cast<size_t>(y)*stride+x+1]+row;
+        }
+    }
+    const int radius=std::max(4,static_cast<int>(std::lround(8.*height/520.)));
+    Image mask{width,height,std::vector<uint8_t>(image.bgra.size())};
+    for(int y=0;y<height;++y) {
+        if(cancelled())throw hresult_canceled();
+        const int top=std::max(0,y-radius),bottom=std::min(height,y+radius+1);
+        for(int x=0;x<width;++x) {
+            const int left=std::max(0,x-radius),right=std::min(width,x+radius+1);
+            const int64_t sum=integral[static_cast<size_t>(bottom)*stride+right]-integral[static_cast<size_t>(top)*stride+right]
+                -integral[static_cast<size_t>(bottom)*stride+left]+integral[static_cast<size_t>(top)*stride+left];
+            const double mean=static_cast<double>(sum)/((right-left)*(bottom-top));
+            const int value=gray[static_cast<size_t>(y)*width+x];
+            const bool ink=value<90&&((mean-value)>=std::max(6.,mean*.13)||(value<=20&&mean-value>=3));
+            auto pixel=mask.bgra.data()+(static_cast<size_t>(y)*width+x)*4;
+            pixel[0]=pixel[1]=pixel[2]=ink?0:255;pixel[3]=255;
+        }
+    }
+    return mask;
 }
-// Find the actual horizontal tick beside the text instead of using its baseline.
-std::optional<std::pair<double,double>> FindTick(Image const& image,double textRight,double textY,double textHeight) {
-    const double scale=std::max(.6,textHeight/14.);
-    // OCR sometimes includes the tick as a trailing word: also search behind its box.
-    const int start=std::clamp(static_cast<int>(textRight-30*scale),0,image.width-1);
-    const int end=std::min(image.width-1,static_cast<int>(textRight+45*scale));
-    const int top=std::max(0,static_cast<int>(textY-5*scale));
-    const int bottom=std::min(image.height-1,static_cast<int>(textY+5*scale));
+bool Dark(Image const& mask,int x,int y) {
+    return mask.bgra[(static_cast<size_t>(y)*mask.width+x)*4]==0;
+}
+std::optional<std::pair<double,double>> FindTick(Image const& mask,double expectedX,double textY,double scale) {
+    const int start=std::clamp(static_cast<int>(expectedX-12*scale),0,mask.width-1);
+    const int end=std::min(mask.width-1,static_cast<int>(expectedX+35*scale));
+    const int top=std::max(0,static_cast<int>(textY-8*scale));
+    const int bottom=std::min(mask.height-1,static_cast<int>(textY+8*scale));
     double bestScore=1e9;std::optional<std::pair<double,double>> best;
     for(int y=top;y<=bottom;++y)for(int x=start;x<end;++x) {
-        if(!Dark(image,x,y)||(x>0&&Dark(image,x-1,y)))continue;
-        int right=x;while(right<image.width&&Dark(image,right,y))++right;
+        if(!Dark(mask,x,y)||(x>0&&Dark(mask,x-1,y)))continue;
+        int right=x;while(right<mask.width&&Dark(mask,right,y))++right;
         const int length=right-x;
-        if(length<14*scale||length>32*scale)continue;
-        // Both endpoints must be close to the label, not a background edge.
-        if(right>end)continue;
+        if(length<13*scale||length>32*scale||right>end)continue;
         const int reach=std::max(3,static_cast<int>(5*scale));
-        if(y<reach||y+reach>=image.height)continue;
+        if(y<reach||y+reach>=mask.height)continue;
         bool stem=false;
-        for(int stemX=x;stemX<=std::min(x+2,right-1);++stemX)
-            if(Dark(image,stemX,y-reach)&&Dark(image,stemX,y+reach))stem=true;
+        for(int stemX=x;stemX<=std::min(x+2,right-1);++stemX) {
+            int vertical=0;
+            for(int dy=-reach;dy<=reach;++dy)if(Dark(mask,stemX,y+dy))++vertical;
+            if(vertical>=(2*reach+1)*.75)stem=true;
+        }
         if(!stem)continue;
-        const double score=std::abs(y-textY)+std::abs(length-20*scale)*.1;
+        const double score=std::abs(y-textY)+std::abs(x-expectedX)*.25+std::abs(length-20*scale)*.1;
         if(score<bestScore){bestScore=score;best=std::pair<double,double>{x,static_cast<double>(y)};}
         x=right;
     }
     return best;
 }
-void ReadLabels(winrt::Windows::Media::Ocr::OcrResult const& result,Image const& image,int factor,SightOutput& output) {
-    static const std::wregex meters(L"^([0-9]{2,3})[mMмМ][|Il:;.,+\\-]*$");
+std::optional<double> ReadDistance(std::wstring text) {
+    text.erase(std::remove_if(text.begin(),text.end(),[](wchar_t c){return iswspace(c)!=0;}),text.end());
+    // An omitted unit is accepted only for exact entries of the L81 table.
+    while(!text.empty()&&(text.back()==L'|'||text.back()==L'.'||text.back()==L':'||text.back()==L'-'||text.back()==L'+'))text.pop_back();
+    if(!text.empty()&&(text.back()==L'M'||text.back()==L'm'||text.back()==L'М'||text.back()==L'м'))text.pop_back();
+    if(text.size()<2||text.size()>3)return {};
+    int value=0;
+    for(auto c:text) {
+        if(c==L'O'||c==L'o')c=L'0';else if(c==L'I'||c==L'l'||c==L'|')c=L'1';
+        else if(c==L'S'||c==L's')c=L'5';else if(c==L'B')c=L'8';
+        if(c<L'0'||c>L'9')return {};value=value*10+c-L'0';
+    }
+    for(auto node:MortarTable)if(node.first==value)return static_cast<double>(value);
+    return {};
+}
+void AddUnique(std::vector<SightLabel>& labels,SightLabel label,double tolerance) {
+    for(auto const& prior:labels)if(prior.distance==label.distance&&std::abs(prior.y-label.y)<=tolerance)return;
+    labels.push_back(label);
+}
+void ReadLabels(winrt::Windows::Media::Ocr::OcrResult const& result,Image const& mask,int factor,
+    double expectedTickX,double scale,SightOutput& output) {
     for(auto const& line:result.Lines()) {
-        std::wstring text;double left=1e9,right=0,top=1e9,bottom=0;
+        std::wstring text;double top=1e9,bottom=0;
         for(auto const& word:line.Words()) {
-            for(auto c:word.Text())if(!iswspace(c))text+=c;
-            auto box=word.BoundingRect();left=std::min(left,static_cast<double>(box.X/factor));right=std::max(right,static_cast<double>((box.X+box.Width)/factor));
-            top=std::min(top,static_cast<double>(box.Y/factor));bottom=std::max(bottom,static_cast<double>((box.Y+box.Height)/factor));
+            text+=word.Text();
+            auto box=word.BoundingRect();top=std::min(top,static_cast<double>(box.Y/factor));
+            bottom=std::max(bottom,static_cast<double>((box.Y+box.Height)/factor));
         }
-        std::wsmatch match;if(!std::regex_match(text,match,meters))continue;
-        const double distance=std::stod(match[1]);
-        if(std::none_of(MortarTable.begin(),MortarTable.end(),[&](auto node){return node.first==distance;}))continue;
-        if(right-left>image.width*.7||bottom-top<4)continue;
-        auto tick=FindTick(image,right,(top+bottom)*.5,bottom-top);if(!tick)continue;
-        bool duplicate=false;
-        for(auto const& label:output.labels)if(label.distance==distance&&std::abs(label.y-tick->second)<5)duplicate=true;
-        if(!duplicate)output.labels.push_back({distance,tick->second,tick->first});
+        auto distance=ReadDistance(text);if(!distance||bottom-top<4*scale||bottom-top>25*scale)continue;
+        const double y=(top+bottom)*.5;
+        AddUnique(output.textLabels,{*distance,y,expectedTickX},8*scale);
+        auto tick=FindTick(mask,expectedTickX,y,scale);if(!tick)continue;
+        AddUnique(output.labels,{*distance,tick->second,tick->first},5*scale);
     }
 }
-Image Prepare(Image const& source,int factor,bool threshold,std::function<bool()> const& cancelled) {
-    Image result{source.width*factor,source.height*factor,std::vector<uint8_t>(static_cast<size_t>(source.width)*source.height*factor*factor*4)};
+Image Prepare(Image const& source,int left,int right,int factor,Cancelled const& cancelled) {
+    Image result{(right-left)*factor,source.height*factor,std::vector<uint8_t>(static_cast<size_t>(right-left)*source.height*factor*factor*4)};
+    // Bilinear enlargement preserves antialiased digit edges.
     for(int y=0;y<result.height;++y) {
         if(cancelled())throw hresult_canceled();
+        const double sy=(y+.5)/factor-.5;
+        const int y0=std::clamp(static_cast<int>(std::floor(sy)),0,source.height-1),y1=std::min(source.height-1,y0+1);
+        const double fy=std::clamp(sy-y0,0.,1.);
         for(int x=0;x<result.width;++x) {
-            auto from=source.bgra.data()+(static_cast<size_t>(y/factor)*source.width+x/factor)*4;
-            auto to=result.bgra.data()+(static_cast<size_t>(y)*result.width+x)*4;
-            for(int c=0;c<3;++c)to[c]=threshold?(std::max({from[0],from[1],from[2]})<100?0:255):from[c];
-            to[3]=255;
+            const double sx=left+(x+.5)/factor-.5;
+            const int x0=std::clamp(static_cast<int>(std::floor(sx)),left,right-1),x1=std::min(right-1,x0+1);
+            const double fx=std::clamp(sx-x0,0.,1.);
+            auto target=result.bgra.data()+(static_cast<size_t>(y)*result.width+x)*4;
+            for(int c=0;c<3;++c) {
+                auto at=[&](int px,int py){return source.bgra[(static_cast<size_t>(py)*source.width+px)*4+c];};
+                target[c]=static_cast<uint8_t>(std::lround((at(x0,y0)*(1-fx)+at(x1,y0)*fx)*(1-fy)+(at(x0,y1)*(1-fx)+at(x1,y1)*fx)*fy));
+            }
+            target[3]=255;
         }
     }
     return result;
@@ -77,16 +134,33 @@ winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,std::sh
     auto cancel=co_await get_cancellation_token();cancel.enable_propagation();co_await resume_background();
     using winrt::Windows::Media::Ocr::OcrEngine;
     if(image.width<=0||image.height<=0||image.bgra.size()!=static_cast<size_t>(image.width)*image.height*4)throw hresult_error(E_INVALIDARG);
-    const int factor=std::min(3,static_cast<int>(OcrEngine::MaxImageDimension())/std::max(image.width,image.height));
+    const int factor=std::min(4,static_cast<int>(OcrEngine::MaxImageDimension())/std::max(image.width,image.height));
     if(factor<1)throw hresult_error(E_INVALIDARG,L"Sight capture is too large for Windows OCR");
     auto engine=OcrEngine::TryCreateFromLanguage(winrt::Windows::Globalization::Language(L"en-US"));
     if(!engine)throw hresult_error(E_FAIL,L"English Windows OCR is unavailable");
     output->preview=image;
-    for(bool threshold:{false,true}) {
+    const double scale=image.height/520.;
+    // Capture begins 410 px left of centre; ticks are 270 px left of centre.
+    const double expectedTickX=140*scale;
+    const int left=std::clamp(static_cast<int>(std::lround(expectedTickX-65*scale)),0,image.width-1);
+    const int right=std::clamp(static_cast<int>(std::lround(expectedTickX-5*scale)),left+1,image.width);
+    auto mask=InkMask(image,[cancel]{return cancel();});
+    for(int pass=0;pass<3;++pass) {
         if(cancel())throw hresult_canceled();
-        auto prepared=Prepare(image,factor,threshold,[cancel]{return cancel();});
+        Image source;
+        if(pass==0)source=image;
+        else if(pass==1)source=mask;
+        else {
+            source=image;
+            for(size_t i=0;i<source.bgra.size();i+=4) {
+                const uint8_t value=std::max({source.bgra[i],source.bgra[i+1],source.bgra[i+2]})<40?0:255;
+                source.bgra[i]=source.bgra[i+1]=source.bgra[i+2]=value;
+            }
+        }
+        auto prepared=Prepare(source,left,right,factor,[cancel]{return cancel();});
         auto recognized=co_await engine.RecognizeAsync(ToBitmap(prepared));
-        if(cancel())throw hresult_canceled();ReadLabels(recognized,image,factor,*output);
+        if(cancel())throw hresult_canceled();ReadLabels(recognized,mask,factor,expectedTickX,scale,*output);
+        if(LocateSightMark(output->labels,550,102*scale/50.,std::max(2.,3*scale)))break;
     }
 }
 }
