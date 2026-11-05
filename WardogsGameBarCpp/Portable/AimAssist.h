@@ -49,7 +49,7 @@ private:
     ULONGLONG m_nextScan=0,m_lastCapture=0;
     Image m_preview;
     std::optional<double> m_mark;
-    std::wstring m_ru=L"F5: наведите курсор на левую шкалу прицела",m_en=L"F5: hover over the left sight range scale";
+    std::wstring m_ru=L"Откройте прицел: F5 найдёт левую шкалу автоматически",m_en=L"Open the sight: F5 locates the left scale automatically";
     std::shared_ptr<Job> m_job;
     std::jthread m_worker;
 };

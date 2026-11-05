@@ -53,7 +53,6 @@ bool AimAssist::ContextValid() const {
 }
 void AimAssist::Request(bool tracking,double targetMil,double distance) {
     if(tracking&&m_tracking){Clear();return;}
-    const HWND previousGame=m_game;const RECT previousRegion=m_region,previousGameRect=m_gameRect;
     Clear();
     try {
         if(!std::isfinite(targetMil)||targetMil<150||targetMil>950||!std::isfinite(distance)||distance<80||distance>684) {
@@ -65,15 +64,17 @@ void AimAssist::Request(bool tracking,double targetMil,double distance) {
         }
         const int width=m_gameRect.right-m_gameRect.left,height=m_gameRect.bottom-m_gameRect.top;
         m_scale=height/1080.;m_center={m_gameRect.left+width/2,m_gameRect.top+height/2};
-        if(tracking&&previousGame==m_game&&EqualRect(&previousGameRect,&m_gameRect)&&previousRegion.right>previousRegion.left)m_region=previousRegion;
-        else {
-            POINT cursor{};if(!GetCursorPos(&cursor))throw_last_error();
-            if(cursor.x<m_gameRect.left+width*.1||cursor.x>m_center.x-width*.04||cursor.y<m_gameRect.top||cursor.y>=m_gameRect.bottom) {
-                Clear();SetStatus(L"Наведите курсор на цифры левой шкалы и нажмите F5",L"Hover over the left range labels and press F5");return;
-            }
-            // A narrow strip around the cursor's X; all visible ticks around the sight centre.
-            const int halfWidth=static_cast<int>(100*m_scale),halfHeight=static_cast<int>(260*m_scale);
-            m_region={cursor.x-halfWidth,m_center.y-halfHeight,cursor.x+halfWidth,m_center.y+halfHeight};
+        // The game locks the cursor to the sight centre. Locate the left ruler
+        // from the client centre instead; offsets scale with the viewport height.
+        // Reference L81 at 1920x1080: labels x=634..680, ticks x=690..710.
+        // Capture x=550..770, y=280..800. No cursor movement or calibration needed.
+        m_region={
+            std::max(m_gameRect.left,m_center.x-static_cast<int>(std::lround(410*m_scale))),
+            std::max(m_gameRect.top,m_center.y-static_cast<int>(std::lround(260*m_scale))),
+            std::min(m_gameRect.right,m_center.x-static_cast<int>(std::lround(190*m_scale))),
+            std::min(m_gameRect.bottom,m_center.y+static_cast<int>(std::lround(260*m_scale)))};
+        if(m_region.right<=m_region.left||m_region.bottom<=m_region.top) {
+            Clear();SetStatus(L"Не удалось определить область левой шкалы в этом окне",L"Could not locate the left scale region in this window");return;
         }
         RECT hud{},overlap{};GetWindowRect(m_owner,&hud);
         if(IntersectRect(&overlap,&hud,&m_region)) {
@@ -164,7 +165,7 @@ void AimAssist::Finish(uint64_t generation) {
         HideMark();++m_failures;
         if(!m_tracking){m_active=false;KillTimer(m_owner,TimerId);}
         if(m_tracking&&m_failures>=3){Clear();SetStatus(L"Шкала пропала: сопровождение остановлено",L"Scale lost: tracking stopped");}
-        else SetStatus(L"Не найдены 3 деления. Наведите курсор точнее: F5",L"Need 3 readable ticks. Align the cursor and press F5");
+        else SetStatus(L"Не найдены 3 деления. Откройте прицел L81 и повторите F5",L"Need 3 readable ticks. Open the L81 sight and press F5 again");
         return;
     }
     m_failures=0;
