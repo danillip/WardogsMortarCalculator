@@ -13,6 +13,9 @@ struct SightOutput {
     Image processed;
     std::optional<SightSolution> solution;
     std::optional<HeadingSolution> heading;
+    Image headingPreview;
+    std::wstring headingFilter;
+    bool headingConflict=false;
     std::wstring filter;
     bool conflict=false;
     size_t variants=0;

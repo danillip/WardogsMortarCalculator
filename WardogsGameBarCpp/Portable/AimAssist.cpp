@@ -61,7 +61,7 @@ void AimAssist::Cancel() noexcept {
 }
 void AimAssist::Clear() noexcept {
     m_active=false;m_tracking=false;if(m_owner)KillTimer(m_owner,TimerId);
-    HideMark();Cancel();m_preview={};m_game=nullptr;m_region={};m_failures=0;
+    HideMark();Cancel();m_preview={};m_headingPreview={};m_game=nullptr;m_region={};m_failures=0;
     m_ru=L"F5 — проверка  ·  F6 — сопровождение  ·  F7 — убрать";
     m_en=L"F5 — check  ·  F6 — track  ·  F7 — clear";
     if(m_owner)InvalidateRect(m_owner,nullptr,FALSE);
@@ -218,12 +218,15 @@ void AimAssist::Finish(uint64_t generation) {
     }
     auto solution=job->output->solution;
     m_preview=job->output->processed.bgra.empty()?std::move(job->output->preview):std::move(job->output->processed);
+    m_headingPreview=std::move(job->output->headingPreview);
     if(!solution) {
         HideMark();++m_failures;
         auto [ru,en]=SightFailure(*job->output);
+        if(job->output->heading){ru+=L" Азимут: "+job->output->headingFilter+L".";en+=L" Heading: "+job->output->headingFilter+L".";}
+        else if(job->output->headingConflict){ru+=L" Фильтры азимута расходятся.";en+=L" Heading filters disagree.";}
         if(!m_tracking&&!job->output->heading){m_active=false;KillTimer(m_owner,TimerId);}
         if(m_tracking&&m_failures>=3){
-            auto preview=std::move(m_preview);Clear();m_preview=std::move(preview);
+            auto preview=std::move(m_preview),headingPreview=std::move(m_headingPreview);Clear();m_preview=std::move(preview);m_headingPreview=std::move(headingPreview);
             SetStatus(L"Сопровождение остановлено. "+ru,L"Tracking stopped. "+en);
         }else {
             if(job->output->heading)try{DrawMark({},job->output->heading);}catch(...){}
@@ -243,7 +246,8 @@ void AimAssist::Finish(uint64_t generation) {
         std::wstring ru=std::format(L"{} · {} ({}). ",m_tracking?L"F6":L"F5",job->output->filter,job->output->variants);
         std::wstring en=ru;
         if(solution->textAnchored){ru+=L"По цифрам + штриху. ";en+=L"Labels + tick. ";}
-        if(job->output->heading){ru+=std::format(L"Азимут {:.1f}°, {:+.1f}°. ",job->output->heading->current,job->output->heading->delta);en+=std::format(L"Heading {:.1f}°, {:+.1f}°. ",job->output->heading->current,job->output->heading->delta);}
+        if(job->output->heading){ru+=std::format(L"Азимут {} {:+.1f}°. ",job->output->headingFilter,job->output->heading->delta);en+=std::format(L"Heading {} {:+.1f}°. ",job->output->headingFilter,job->output->heading->delta);}
+        else if(job->output->headingConflict){ru+=L" Фильтры азимута расходятся.";en+=L" Heading filters disagree.";}
         else{ru+=L" Азимут не прочитан.";en+=L" Heading unreadable.";}
         ru+=L" Совместите линии с центром.";en+=L" Align the lines with the centre.";
         SetStatus(std::move(ru),std::move(en));

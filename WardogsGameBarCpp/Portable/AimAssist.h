@@ -21,6 +21,7 @@ public:
     bool Tracking() const {return m_tracking;}
     bool Active() const {return m_active;}
     Image const& Preview() const {return m_preview;}
+    Image const& HeadingPreview() const {return m_headingPreview;}
     std::optional<double> PreviewMark() const {return m_mark;}
     std::wstring const& Status(bool english) const {return english?m_en:m_ru;}
 private:
@@ -48,7 +49,7 @@ private:
     unsigned m_failures=0;
     uint64_t m_generation=0;
     ULONGLONG m_nextScan=0,m_lastCapture=0;
-    Image m_preview;
+    Image m_preview,m_headingPreview;
     std::optional<double> m_mark;
     std::wstring m_ru=L"Откройте прицел: F5 найдёт левую шкалу автоматически",m_en=L"Open the sight: F5 locates the left scale automatically";
     std::shared_ptr<Job> m_job;

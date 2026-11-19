@@ -61,7 +61,8 @@ int main(int argc,char** argv) {
     Near(*WeaponMil(2629,WeaponMode::Artillery,Trajectory::Lower),600,"SPH lower plateau boundary");
     Require(!LabelMil(2629,WeaponMode::Artillery,Trajectory::Lower),"SPH repeated peak range cannot identify an OCR tick");
     Near(*WeaponMil(1574,WeaponMode::Artillery,Trajectory::Lower),100,"SPH observed lower branch");
-    Require(!WeaponMil(2000,WeaponMode::Artillery,Trajectory::Lower),"SPH cannot interpolate through missing calibration");
+    Require(!WeaponMil(1450,WeaponMode::Artillery,Trajectory::Lower),"SPH cannot interpolate through missing calibration");
+    Near(*WeaponMil(2167,WeaponMode::Artillery,Trajectory::Lower),260,"SPH newly observed lower range");
     Require(!WeaponMil(733,WeaponMode::Artillery,Trajectory::Upper)&&!WeaponMil(2630,WeaponMode::Artillery,Trajectory::Upper),"SPH refuses extrapolation");
     auto art=CalculateForWeapon({100,100},{110,100},WeaponMode::Artillery,Trajectory::Upper);
     Near(art.distance_m,1000,"SPH retains map scale");Near(art.azimuth_deg,90,"SPH retains map north");Require(art.elevation_mil.has_value(),"SPH calibrated range");

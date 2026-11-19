@@ -130,7 +130,8 @@ void OverlayWindow::Paint() {
         DrawImage(m_aim.Preview(),Rect(20,245,76,122));
         if(auto mark=m_aim.PreviewMark())Fill(Rect(20,245+static_cast<float>(*mark)*122,76,2),Blue);
     }
-    Text(m_aim.Status(m_settings.common.english),Rect(108,245,267,66),Gray,m_smallFormat.get());
+    Text(m_aim.Status(m_settings.common.english),Rect(108,245,267,48),Gray,m_smallFormat.get());
+    if(m_settings.common.preview)DrawImage(m_aim.HeadingPreview(),Rect(108,295,267,22));
     Text(L"F5",Rect(108,320,76,25),Blue);Text(L"F6",Rect(190,320,76,25),m_aim.Tracking()?Green:Blue);Text(L"F7",Rect(272,320,76,25),Blue);
     Text(Tr(L"Проверка / сопровождение / убрать",L"Check / track / clear"),Rect(108,351,270,23),Muted,m_smallFormat.get());
     Button(L"L81 [F8]",Rect(20,380,88,25),m_settings.weapon==WeaponMode::Mortar);

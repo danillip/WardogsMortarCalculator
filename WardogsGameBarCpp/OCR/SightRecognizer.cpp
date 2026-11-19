@@ -167,6 +167,46 @@ Image Spectral(Image const& image,int mode,bool light,Cancelled const& cancelled
     }
     return InkMask(channel,cancelled,light);
 }
+// Heading digits and strokes have separate polarity: SPH-2 has dark digits
+// above a light ruler. Never OR the two masks: scenery would connect the ink.
+std::optional<double> HeadingTick(Image const& mask,double textX,double scale) {
+    const int x0=std::max(0,static_cast<int>(std::lround(textX-5*scale)));
+    const int x1=std::min(mask.width-1,static_cast<int>(std::lround(textX+5*scale)));
+    const int y0=std::max(0,static_cast<int>(std::lround(68*scale)));
+    const int y1=std::min(mask.height-1,static_cast<int>(std::lround(78*scale)));
+    const int rise=std::max(6,static_cast<int>(std::lround(18*scale)));
+    const int arm=std::max(4,static_cast<int>(std::lround(7*scale)));
+    double score=1e9;std::optional<double> best;
+    for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x) {
+        if(y<rise||x<arm||x+arm>=mask.width)continue;
+        int stem=0,base=0,clear=0;
+        for(int k=2;k<=rise;++k) {
+            bool hit=false;for(int dx=-1;dx<=1;++dx)if(x+dx>=0&&x+dx<mask.width&&Dark(mask,x+dx,y-k))hit=true;
+            if(hit)++stem;
+            if(k>=rise/2){if(!Dark(mask,x-arm,y-k))++clear;if(!Dark(mask,x+arm,y-k))++clear;}
+        }
+        for(int dx=-arm;dx<=arm;++dx) {
+            bool hit=false;for(int dy=-1;dy<=1;++dy)if(y+dy>=0&&y+dy<mask.height&&Dark(mask,x+dx,y+dy))hit=true;
+            if(hit)++base;
+        }
+        if(stem<(rise-1)*.75||base<(arm*2+1)*.65||clear<(rise-rise/2+1)*.7)continue;
+        const double candidate=std::abs(x-textX)+std::abs(y-72*scale)*.25+(rise-1-stem)*.5;
+        if(candidate<score){score=candidate;best=x;}
+    }
+    return best;
+}
+Image HeadingDigits(Image image,double scale) {
+    // Keep the digit row only. A white horizontal ruler is not part of a glyph.
+    const int bottom=std::clamp(static_cast<int>(std::lround(52*scale)),1,image.height);
+    image.height=bottom;image.bgra.resize(static_cast<size_t>(image.width)*bottom*4);
+    return image;
+}
+Image HeadingPreview(Image const& digits,Image const& strokes,double scale) {
+    Image result=strokes;
+    const int rows=std::min(result.height,static_cast<int>(std::lround(48*scale)));
+    std::copy_n(digits.bgra.begin(),static_cast<size_t>(rows)*result.width*4,result.bgra.begin());
+    return result;
+}
 std::vector<HeadingLabel> ReadHeading(winrt::Windows::Media::Ocr::OcrResult const& result,int factor,double scale) {
     std::vector<HeadingLabel> labels;
     for(auto const& line:result.Lines())for(auto const& word:line.Words()) {
@@ -195,14 +235,17 @@ winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,Image h
     const bool light=request.weapon==WeaponMode::Artillery;
     auto normalMask=InkMask(image,[cancel]{return cancel();},light);
     constexpr wchar_t const* names[]{L"RGB",L"Local",L"Red",L"Green",L"Blue",L"Min RGB",L"Max RGB",L"Inverse"};
+    // Min/max RGB suppress coloured scenery while retaining neutral HUD ink.
+    constexpr int order[]{0,1,5,6,2,3,4,7};
     std::vector<SightOutput> candidates;
     size_t variants=0;
     const ULONGLONG start=GetTickCount64();
     for(int pass=0;pass<(request.tracking?4:8);++pass) {
         if(cancel())throw hresult_canceled();
         if(pass>=2&&GetTickCount64()-start>(request.tracking?1100:2800))break;
-        auto source=Spectral(image,pass,light,[cancel]{return cancel();});
-        auto const& mask=pass==0?normalMask:source;
+        const int mode=order[pass];
+        auto source=Spectral(image,mode,light,[cancel]{return cancel();});
+        auto const& mask=mode==0||mode==7?normalMask:source;
         auto prepared=Prepare(source,left,right,factor,[cancel]{return cancel();});
         auto recognized=co_await engine.RecognizeAsync(ToBitmap(prepared));
         if(cancel())throw hresult_canceled();++variants;
@@ -210,7 +253,7 @@ winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,Image h
         ReadLabels(recognized,mask,factor,expectedTickX,scale,request,candidate);
         candidate.solution=LocateSightWithText(candidate.labels,candidate.textLabels,request.targetMil,
             SightPixelsPerMil(request.weapon)*scale,std::max(2.,3*scale),RangeIncreasesUp(request.weapon,request.trajectory));
-        candidate.processed=pass==0?normalMask:std::move(source);candidate.filter=names[pass];
+        candidate.processed=mode==0?normalMask:std::move(source);candidate.filter=names[mode];
         if(candidate.solution)candidates.push_back(std::move(candidate));
         else if(candidate.textLabels.size()>output->textLabels.size()) {
             output->textLabels=std::move(candidate.textLabels);output->labels=std::move(candidate.labels);
@@ -231,22 +274,49 @@ winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,Image h
         if(bestVotes>=2)output->solution=chosen.solution;else output->conflict=true;
     }
     output->variants=variants;
-    // Read the inner azimuth ruler independently. Three labels, circular
-    // wraparound and agreement between raw/contrast views are required.
+    // OCR dark heading digits separately from the weapon's dark/light strokes.
+    // Each candidate must anchor three labels to actual major ticks, then agree
+    // with another image treatment. Raw OCR alone cannot establish the ruler.
     if(heading.width>0&&heading.height>0&&heading.bgra.size()==static_cast<size_t>(heading.width)*heading.height*4) {
         const int headingFactor=std::min(3,static_cast<int>(OcrEngine::MaxImageDimension())/std::max(heading.width,heading.height));
-        std::optional<HeadingSolution> first;
-        if(headingFactor>0)for(int pass=0;pass<3;++pass) {
+        struct HeadingCandidate {HeadingSolution solution;Image preview;std::wstring filter;};
+        std::vector<HeadingCandidate> headings;
+        auto headingMask=InkMask(heading,[cancel]{return cancel();},light);
+        const auto headingStart=GetTickCount64();
+        if(headingFactor>0)for(int pass=0;pass<(request.tracking?4:8);++pass) {
             if(cancel())throw hresult_canceled();
-            auto source=pass==0?heading:InkMask(heading,[cancel]{return cancel();},pass==2);
-            auto prepared=Prepare(source,0,source.width,headingFactor,[cancel]{return cancel();});
+            if(pass>=2&&GetTickCount64()-headingStart>(request.tracking?650:1500))break;
+            const int mode=order[pass];
+            auto source=Spectral(heading,mode,false,[cancel]{return cancel();});
+            // The digit filter may change polarity; tick detection must not.
+            auto strokes=mode==0||mode==7?headingMask:Spectral(heading,mode,light,[cancel]{return cancel();});
+            auto digits=HeadingDigits(source,scale);
+            auto prepared=Prepare(digits,0,digits.width,headingFactor,[cancel]{return cancel();});
             auto recognized=co_await engine.RecognizeAsync(ToBitmap(prepared));
             if(cancel())throw hresult_canceled();
-            auto solution=LocateHeading(ReadHeading(recognized,headingFactor,scale),request.targetAzimuth,heading.width*.5,83.*scale/15.,std::max(2.,3*scale));
+            std::vector<HeadingLabel> anchored;
+            for(auto label:ReadHeading(recognized,headingFactor,scale)) {
+                auto tick=HeadingTick(strokes,label.x,scale);if(!tick)continue;
+                label.x=*tick;anchored.push_back(label);
+            }
+            auto solution=LocateHeading(anchored,request.targetAzimuth,heading.width*.5,83.*scale/15.,std::max(2.,3*scale));
+            auto preview=HeadingPreview(mode==0?InkMask(heading,[cancel]{return cancel();},false):source,strokes,scale);
+            if(output->headingPreview.bgra.empty()){output->headingPreview=preview;output->headingFilter=names[mode];}
             if(!solution)continue;
-            if(first&&std::abs(HeadingDelta(first->current,solution->current))<=.7) {output->heading=solution;break;}
-            first=solution;
+            headings.push_back({*solution,std::move(preview),names[mode]});
         }
+        size_t headingVotes=0;double headingScore=-1e9;
+        for(auto const& candidate:headings) {
+            size_t votes=0;
+            for(auto const& other:headings)if(std::abs(HeadingDelta(candidate.solution.current,other.solution.current))<=.7&&
+                std::abs(candidate.solution.x-other.solution.x)<=std::max(2.,3*scale))++votes;
+            const double score=votes*100+candidate.solution.inliers*20-candidate.solution.residual*4;
+            if(votes>=2&&score>headingScore) {
+                headingVotes=votes;headingScore=score;output->heading=candidate.solution;
+                output->headingPreview=candidate.preview;output->headingFilter=candidate.filter;
+            }
+        }
+        output->headingConflict=!headings.empty()&&headingVotes<2;
     }
 }
 }
