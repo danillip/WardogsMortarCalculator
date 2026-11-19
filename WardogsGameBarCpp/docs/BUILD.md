@@ -20,7 +20,7 @@ artifacts/x64/Release/Portable/WardogsPortable.exe
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Prepare-PortableRelease.ps1
 ```
 
-Готовые файлы появятся в `artifacts/releases/portable-v0.2.0/`: EXE, SHA-256 и лицензия. Скрипт не собирает и не запускает приложение; он проверяет версию, x64, актуальность EXE и наличие личных путей внутри файла. Настройки и отладочные файлы в релиз не копируются.
+Готовые файлы появятся в `artifacts/releases/portable-v0.3.0/`: EXE, SHA-256 и лицензия. Скрипт не собирает и не запускает приложение; он проверяет версию, x64, актуальность EXE и наличие личных путей внутри файла. Настройки и отладочные файлы в релиз не копируются.
 
 ## Game Bar
 

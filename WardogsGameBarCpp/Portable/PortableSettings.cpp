@@ -40,6 +40,8 @@ OverlaySettings PortableSettingsStore::Load() const {
         settings.common.captureSize=integer(L"captureSize",320,160,640);
         settings.x=integer(L"x",40,-100000,100000);settings.y=integer(L"y",40,-100000,100000);
         settings.topmost=object.GetNamedBoolean(L"topmost",true);settings.clickThrough=object.GetNamedBoolean(L"clickThrough",true);
+        settings.weapon=static_cast<WeaponMode>(integer(L"weapon",0,0,1));
+        settings.trajectory=static_cast<Trajectory>(integer(L"trajectory",0,0,1));
         for(int i=0;i<4;++i)settings.common.hotkeys[i]=object.GetNamedString(L"hotkey"+std::to_wstring(i),settings.common.hotkeys[i]);
         NormalizeSettings(settings.common);
     }catch(...){return OverlaySettings{};}
@@ -53,6 +55,8 @@ void PortableSettingsStore::Save(OverlaySettings const& settings) const {
     object.SetNamedValue(L"captureSize",JsonValue::CreateNumberValue(settings.common.captureSize));
     object.SetNamedValue(L"x",JsonValue::CreateNumberValue(settings.x));object.SetNamedValue(L"y",JsonValue::CreateNumberValue(settings.y));
     object.SetNamedValue(L"topmost",JsonValue::CreateBooleanValue(settings.topmost));object.SetNamedValue(L"clickThrough",JsonValue::CreateBooleanValue(settings.clickThrough));
+    object.SetNamedValue(L"weapon",JsonValue::CreateNumberValue(static_cast<int>(settings.weapon)));
+    object.SetNamedValue(L"trajectory",JsonValue::CreateNumberValue(static_cast<int>(settings.trajectory)));
     for(int i=0;i<4;++i)object.SetNamedValue(L"hotkey"+std::to_wstring(i),JsonValue::CreateStringValue(settings.common.hotkeys[i]));
     const auto utf8=to_string(object.Stringify());auto temporary=m_path;temporary+=L".tmp";
     try {

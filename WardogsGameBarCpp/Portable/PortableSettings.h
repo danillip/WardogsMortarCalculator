@@ -1,11 +1,14 @@
 #pragma once
 #include "../Settings/SettingsManager.h"
+#include "../Core/WeaponProfile.h"
 #include <filesystem>
 namespace wardogs {
 struct OverlaySettings {
     Settings common;
     int x=40,y=40;
     bool topmost=true,clickThrough=true;
+    WeaponMode weapon=WeaponMode::Mortar;
+    Trajectory trajectory=Trajectory::Upper;
 };
 class PortableSettingsStore {
 public:

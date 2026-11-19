@@ -55,6 +55,8 @@ private:
     void SetStatus(std::wstring ru,std::wstring en,bool error=false);
     void Recalculate();
     void RequestAim(bool tracking);
+    void ChangeWeapon();
+    void ChangeTrajectory();
     std::wstring Tr(wchar_t const* ru,wchar_t const* en) const;
     HWND m_window{};
     float m_scale=1;
@@ -62,7 +64,7 @@ private:
     int m_activeField=-1,m_rebinding=-1,m_slider=0;
     size_t m_caret=0;
     bool m_selectAll=false;
-    std::array<bool,7> m_registered{};
+    std::array<bool,9> m_registered{};
     std::array<std::wstring,4> m_fields;
     std::optional<Coordinates> m_gun,m_target;
     std::wstring m_statusRu,m_statusEn,m_azimuth=L"---.-°",m_elevation=L"--- mil",m_distance=L"---";

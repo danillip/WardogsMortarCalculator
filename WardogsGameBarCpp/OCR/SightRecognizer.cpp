@@ -11,7 +11,7 @@ using Cancelled=std::function<bool()>;
 
 // Local contrast retains black lettering on dark walls. A fixed threshold of
 // 100 merged the lettering and much of the scenery into one black component.
-Image InkMask(Image const& image,Cancelled const& cancelled) {
+Image InkMask(Image const& image,Cancelled const& cancelled,bool light=false) {
     const int width=image.width,height=image.height,stride=width+1;
     std::vector<int> gray(static_cast<size_t>(width)*height);
     std::vector<int64_t> integral(static_cast<size_t>(stride)*(height+1));
@@ -36,7 +36,8 @@ Image InkMask(Image const& image,Cancelled const& cancelled) {
                 -integral[static_cast<size_t>(bottom)*stride+left]+integral[static_cast<size_t>(top)*stride+left];
             const double mean=static_cast<double>(sum)/((right-left)*(bottom-top));
             const int value=gray[static_cast<size_t>(y)*width+x];
-            const bool ink=value<90&&((mean-value)>=std::max(6.,mean*.13)||(value<=20&&mean-value>=3));
+            const bool ink=light?(value>140&&value-mean>=std::max(6.,(255-mean)*.13)):
+                (value<100&&((mean-value)>=std::max(6.,mean*.13)||(value<=20&&mean-value>=3)));
             auto pixel=mask.bgra.data()+(static_cast<size_t>(y)*width+x)*4;
             pixel[0]=pixel[1]=pixel[2]=ink?0:255;pixel[3]=255;
         }
@@ -94,27 +95,26 @@ std::optional<std::pair<double,double>> FindTick(Image const& mask,double expect
     }
     return best;
 }
-std::optional<double> ReadDistance(std::wstring text) {
+std::optional<int> ReadNumber(std::wstring text) {
     text.erase(std::remove_if(text.begin(),text.end(),[](wchar_t c){return iswspace(c)!=0;}),text.end());
-    // An omitted unit is accepted only for exact entries of the L81 table.
+    // Range readers accept an omitted unit only for exact calibration entries.
     while(!text.empty()&&(text.back()==L'|'||text.back()==L'.'||text.back()==L':'||text.back()==L'-'||text.back()==L'+'))text.pop_back();
     if(!text.empty()&&(text.back()==L'M'||text.back()==L'm'||text.back()==L'М'||text.back()==L'м'))text.pop_back();
-    if(text.size()<2||text.size()>3)return {};
+    if(text.empty()||text.size()>4)return {};
     int value=0;
     for(auto c:text) {
         if(c==L'O'||c==L'o')c=L'0';else if(c==L'I'||c==L'l'||c==L'|')c=L'1';
         else if(c==L'S'||c==L's')c=L'5';else if(c==L'B')c=L'8';
         if(c<L'0'||c>L'9')return {};value=value*10+c-L'0';
     }
-    for(auto node:MortarTable)if(node.first==value)return static_cast<double>(value);
-    return {};
+    return value;
 }
 void AddUnique(std::vector<SightLabel>& labels,SightLabel label,double tolerance) {
     for(auto const& prior:labels)if(prior.distance==label.distance&&std::abs(prior.y-label.y)<=tolerance)return;
     labels.push_back(label);
 }
 void ReadLabels(winrt::Windows::Media::Ocr::OcrResult const& result,Image const& mask,int factor,
-    double expectedTickX,double scale,SightOutput& output) {
+    double expectedTickX,double scale,SightRequest const& request,SightOutput& output) {
     for(auto const& line:result.Lines()) {
         std::wstring text;double top=1e9,bottom=0;
         for(auto const& word:line.Words()) {
@@ -122,11 +122,12 @@ void ReadLabels(winrt::Windows::Media::Ocr::OcrResult const& result,Image const&
             auto box=word.BoundingRect();top=std::min(top,static_cast<double>(box.Y/factor));
             bottom=std::max(bottom,static_cast<double>((box.Y+box.Height)/factor));
         }
-        auto distance=ReadDistance(text);if(!distance||bottom-top<4*scale||bottom-top>25*scale)continue;
+        auto distance=ReadNumber(text);if(!distance||bottom-top<4*scale||bottom-top>25*scale)continue;
+        auto mil=LabelMil(*distance,request.weapon,request.trajectory);if(!mil)continue;
         const double y=(top+bottom)*.5;
-        AddUnique(output.textLabels,{*distance,y,expectedTickX},8*scale);
+        AddUnique(output.textLabels,{static_cast<double>(*distance),y,expectedTickX,mil},8*scale);
         auto tick=FindTick(mask,expectedTickX,y,scale);if(!tick)continue;
-        AddUnique(output.labels,{*distance,tick->second,tick->first},5*scale);
+        AddUnique(output.labels,{static_cast<double>(*distance),tick->second,tick->first,mil},5*scale);
     }
 }
 Image Prepare(Image const& source,int left,int right,int factor,Cancelled const& cancelled) {
@@ -151,8 +152,33 @@ Image Prepare(Image const& source,int left,int right,int factor,Cancelled const&
     }
     return result;
 }
+Image Spectral(Image const& image,int mode,bool light,Cancelled const& cancelled) {
+    if(mode==0)return image;
+    if(mode==1)return InkMask(image,cancelled,light);
+    if(mode==7)return InkMask(image,cancelled,!light);
+    Image channel=image;
+    for(int y=0;y<image.height;++y) {
+        if(cancelled())throw hresult_canceled();
+        for(int x=0;x<image.width;++x) {
+            auto p=channel.bgra.data()+(static_cast<size_t>(y)*image.width+x)*4;
+            uint8_t v=mode==2?p[2]:mode==3?p[1]:mode==4?p[0]:mode==5?std::min({p[0],p[1],p[2]}):std::max({p[0],p[1],p[2]});
+            p[0]=p[1]=p[2]=v;
+        }
+    }
+    return InkMask(channel,cancelled,light);
 }
-winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,std::shared_ptr<SightOutput> output) {
+std::vector<HeadingLabel> ReadHeading(winrt::Windows::Media::Ocr::OcrResult const& result,int factor,double scale) {
+    std::vector<HeadingLabel> labels;
+    for(auto const& line:result.Lines())for(auto const& word:line.Words()) {
+        auto value=ReadNumber(std::wstring(word.Text()));auto box=word.BoundingRect();
+        if(!value||*value>=360||*value%15!=0||box.Y/factor>55*scale||box.Height/factor<4*scale||box.Height/factor>22*scale)continue;
+        labels.push_back({static_cast<double>(*value),(box.X+box.Width*.5)/factor});
+    }
+    return labels;
+}
+}
+winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,Image heading,
+    SightRequest request,std::shared_ptr<SightOutput> output) {
     auto cancel=co_await get_cancellation_token();cancel.enable_propagation();co_await resume_background();
     using winrt::Windows::Media::Ocr::OcrEngine;
     if(image.width<=0||image.height<=0||image.bgra.size()!=static_cast<size_t>(image.width)*image.height*4)throw hresult_error(E_INVALIDARG);
@@ -163,26 +189,64 @@ winrt::Windows::Foundation::IAsyncAction RecognizeSightAsync(Image image,std::sh
     output->preview=image;
     const double scale=image.height/520.;
     // Capture begins 410 px left of centre; ticks are 270 px left of centre.
-    const double expectedTickX=140*scale;
-    const int left=std::clamp(static_cast<int>(std::lround(expectedTickX-65*scale)),0,image.width-1);
+    const double expectedTickX=(request.weapon==WeaponMode::Artillery?145:140)*scale;
+    const int left=std::clamp(static_cast<int>(std::lround(expectedTickX-70*scale)),0,image.width-1);
     const int right=std::clamp(static_cast<int>(std::lround(expectedTickX-5*scale)),left+1,image.width);
-    auto mask=InkMask(image,[cancel]{return cancel();});
-    for(int pass=0;pass<3;++pass) {
+    const bool light=request.weapon==WeaponMode::Artillery;
+    auto normalMask=InkMask(image,[cancel]{return cancel();},light);
+    constexpr wchar_t const* names[]{L"RGB",L"Local",L"Red",L"Green",L"Blue",L"Min RGB",L"Max RGB",L"Inverse"};
+    std::vector<SightOutput> candidates;
+    size_t variants=0;
+    const ULONGLONG start=GetTickCount64();
+    for(int pass=0;pass<(request.tracking?4:8);++pass) {
         if(cancel())throw hresult_canceled();
-        Image source;
-        if(pass==0)source=image;
-        else if(pass==1)source=mask;
-        else {
-            source=image;
-            for(size_t i=0;i<source.bgra.size();i+=4) {
-                const uint8_t value=std::max({source.bgra[i],source.bgra[i+1],source.bgra[i+2]})<40?0:255;
-                source.bgra[i]=source.bgra[i+1]=source.bgra[i+2]=value;
-            }
-        }
+        if(pass>=2&&GetTickCount64()-start>(request.tracking?1100:2800))break;
+        auto source=Spectral(image,pass,light,[cancel]{return cancel();});
+        auto const& mask=pass==0?normalMask:source;
         auto prepared=Prepare(source,left,right,factor,[cancel]{return cancel();});
         auto recognized=co_await engine.RecognizeAsync(ToBitmap(prepared));
-        if(cancel())throw hresult_canceled();ReadLabels(recognized,mask,factor,expectedTickX,scale,*output);
-        if(LocateSightWithText(output->labels,output->textLabels,550,102*scale/50.,std::max(2.,3*scale)))break;
+        if(cancel())throw hresult_canceled();++variants;
+        SightOutput candidate;
+        ReadLabels(recognized,mask,factor,expectedTickX,scale,request,candidate);
+        candidate.solution=LocateSightWithText(candidate.labels,candidate.textLabels,request.targetMil,
+            SightPixelsPerMil(request.weapon)*scale,std::max(2.,3*scale),RangeIncreasesUp(request.weapon,request.trajectory));
+        candidate.processed=pass==0?normalMask:std::move(source);candidate.filter=names[pass];
+        if(candidate.solution)candidates.push_back(std::move(candidate));
+        else if(candidate.textLabels.size()>output->textLabels.size()) {
+            output->textLabels=std::move(candidate.textLabels);output->labels=std::move(candidate.labels);
+            output->processed=std::move(candidate.processed);output->filter=candidate.filter;
+        }
+    }
+    size_t best=0,bestVotes=0;double bestScore=-1e9;
+    for(size_t i=0;i<candidates.size();++i) {
+        const auto& mark=*candidates[i].solution;size_t votes=0;
+        for(auto const& other:candidates)if(std::abs(mark.y-other.solution->y)<=std::max(2.,3*scale)&&std::abs(mark.tickX-other.solution->tickX)<=4*scale)++votes;
+        const double score=votes*100+mark.inliers*20+std::min(candidates[i].labels.size(),mark.inliers)*4+(mark.textAnchored?0:8)-mark.residual*4;
+        if(score>bestScore){best=i;bestScore=score;bestVotes=votes;}
+    }
+    if(!candidates.empty()) {
+        auto chosen=std::move(candidates[best]);
+        output->labels=std::move(chosen.labels);output->textLabels=std::move(chosen.textLabels);
+        output->processed=std::move(chosen.processed);output->filter=std::move(chosen.filter);
+        if(bestVotes>=2)output->solution=chosen.solution;else output->conflict=true;
+    }
+    output->variants=variants;
+    // Read the inner azimuth ruler independently. Three labels, circular
+    // wraparound and agreement between raw/contrast views are required.
+    if(heading.width>0&&heading.height>0&&heading.bgra.size()==static_cast<size_t>(heading.width)*heading.height*4) {
+        const int headingFactor=std::min(3,static_cast<int>(OcrEngine::MaxImageDimension())/std::max(heading.width,heading.height));
+        std::optional<HeadingSolution> first;
+        if(headingFactor>0)for(int pass=0;pass<3;++pass) {
+            if(cancel())throw hresult_canceled();
+            auto source=pass==0?heading:InkMask(heading,[cancel]{return cancel();},pass==2);
+            auto prepared=Prepare(source,0,source.width,headingFactor,[cancel]{return cancel();});
+            auto recognized=co_await engine.RecognizeAsync(ToBitmap(prepared));
+            if(cancel())throw hresult_canceled();
+            auto solution=LocateHeading(ReadHeading(recognized,headingFactor,scale),request.targetAzimuth,heading.width*.5,83.*scale/15.,std::max(2.,3*scale));
+            if(!solution)continue;
+            if(first&&std::abs(HeadingDelta(first->current,solution->current))<=.7) {output->heading=solution;break;}
+            first=solution;
+        }
     }
 }
 }

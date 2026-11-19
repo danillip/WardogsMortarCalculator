@@ -32,6 +32,8 @@
   <ClCompile Include="Main.cpp"/><ClCompile Include="OverlayWindow.cpp"/><ClCompile Include="PortableSettings.cpp"/>
   <ClCompile Include="AimAssist.cpp"/><ClInclude Include="AimAssist.h"/>
   <ClCompile Include="..\Core\SightScale.cpp"/><ClInclude Include="..\Core\SightScale.h"/>
+  <ClCompile Include="..\Core\WeaponProfile.cpp"/><ClInclude Include="..\Core\WeaponProfile.h"/>
+  <ClCompile Include="..\Core\HeadingScale.cpp"/><ClInclude Include="..\Core\HeadingScale.h"/>
   <ClCompile Include="..\OCR\SightRecognizer.cpp"/><ClInclude Include="..\OCR\SightRecognizer.h"/>
   <ClCompile Include="StartupCheck.cpp"/><ClInclude Include="StartupCheck.h"/>
   <ClCompile Include="..\Core\Calculator.cpp"/><ClCompile Include="..\Capture\CaptureService.cpp"/><ClCompile Include="..\OCR\CoordinateRecognizer.cpp"/><ClCompile Include="..\Settings\SettingsModel.cpp"/>

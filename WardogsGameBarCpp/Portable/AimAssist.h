@@ -14,7 +14,7 @@ public:
     ~AimAssist();
     void Initialize(HWND owner);
     void Shutdown() noexcept;
-    void Request(bool tracking,double targetMil,double distance);
+    void Request(bool tracking,double targetMil,double distance,double azimuth,WeaponMode weapon,Trajectory trajectory);
     void Clear() noexcept;
     void Tick();
     void Finish(uint64_t generation);
@@ -36,14 +36,15 @@ private:
     void Cancel() noexcept;
     void Capture();
     void HideMark() noexcept;
-    void DrawMark(SightSolution const& solution);
+    void DrawMark(std::optional<SightSolution> const& solution,std::optional<HeadingSolution> const& heading);
     bool ContextValid() const;
     void SetStatus(std::wstring ru,std::wstring en);
     HWND m_owner{},m_marker{},m_game{};
-    RECT m_gameRect{},m_region{};
+    RECT m_gameRect{},m_region{},m_headingRegion{};
     POINT m_center{};
     double m_mil{},m_distance{},m_scale=1;
-    bool m_active=false,m_tracking=false;
+    bool m_active=false,m_tracking=false,m_guidesVisible=false;
+    SightRequest m_request;
     unsigned m_failures=0;
     uint64_t m_generation=0;
     ULONGLONG m_nextScan=0,m_lastCapture=0;

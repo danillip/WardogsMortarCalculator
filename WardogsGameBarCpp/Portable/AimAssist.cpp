@@ -12,6 +12,7 @@ bool ClientOnScreen(HWND window,RECT& rect) {
     OffsetRect(&rect,origin.x,origin.y);return rect.right-rect.left>=640&&rect.bottom-rect.top>=480;
 }
 std::pair<std::wstring,std::wstring> SightFailure(SightOutput const& output) {
+    if(output.conflict)return {L"Фильтры не подтвердили одну риску. F5 — повторить.",L"Filters did not confirm the same mark. F5 retries."};
     if(output.textLabels.empty())return {L"OCR не прочитал цифры шкалы. F5 — повторить.",L"OCR could not read the range labels. Press F5 to retry."};
     auto labels=output.textLabels;
     std::sort(labels.begin(),labels.end(),[](auto a,auto b){return a.y<b.y;});
@@ -43,7 +44,7 @@ void AimAssist::Initialize(HWND owner) {
 void AimAssist::SetStatus(std::wstring ru,std::wstring en) {
     m_ru=std::move(ru);m_en=std::move(en);if(m_owner)InvalidateRect(m_owner,nullptr,FALSE);
 }
-void AimAssist::HideMark() noexcept {m_mark.reset();if(m_marker)ShowWindow(m_marker,SW_HIDE);}
+void AimAssist::HideMark() noexcept {m_mark.reset();m_guidesVisible=false;if(m_marker)ShowWindow(m_marker,SW_HIDE);}
 void AimAssist::Cancel() noexcept {
     ++m_generation;
     if(m_job) {
@@ -69,12 +70,13 @@ bool AimAssist::ContextValid() const {
     RECT rect{};
     return GetForegroundWindow()==m_game&&ClientOnScreen(m_game,rect)&&EqualRect(&rect,&m_gameRect);
 }
-void AimAssist::Request(bool tracking,double targetMil,double distance) {
+void AimAssist::Request(bool tracking,double targetMil,double distance,double azimuth,WeaponMode weapon,Trajectory trajectory) {
     if(tracking&&m_tracking){Clear();return;}
     Clear();
     try {
-        if(!std::isfinite(targetMil)||targetMil<150||targetMil>950||!std::isfinite(distance)||distance<80||distance>684) {
-            SetStatus(L"Сначала задайте F1/F2: нужна дальность 80–684 м",L"Set F1/F2 first: range must be 80–684 m");return;
+        if(!std::isfinite(targetMil)||targetMil<0||targetMil>1600||!std::isfinite(distance)||!std::isfinite(azimuth)||
+           !WeaponMil(distance,weapon,trajectory)) {
+            SetStatus(L"Для этой дальности нет данных выбранного оружия/ветви",L"No calibration for this range and weapon/branch");return;
         }
         m_game=GetForegroundWindow();DWORD process{};GetWindowThreadProcessId(m_game,&process);
         if(process==GetCurrentProcessId()||!ClientOnScreen(m_game,m_gameRect)) {
@@ -94,11 +96,16 @@ void AimAssist::Request(bool tracking,double targetMil,double distance) {
         if(m_region.right<=m_region.left||m_region.bottom<=m_region.top) {
             Clear();SetStatus(L"Не удалось определить область левой шкалы в этом окне",L"Could not locate the left scale region in this window");return;
         }
+        m_headingRegion={std::max(m_gameRect.left,m_center.x-static_cast<int>(300*m_scale)),
+            std::max(m_gameRect.top,m_center.y-static_cast<int>(290*m_scale)),
+            std::min(m_gameRect.right,m_center.x+static_cast<int>(300*m_scale)),
+            std::min(m_gameRect.bottom,m_center.y-static_cast<int>(205*m_scale))};
         RECT hud{},overlap{};GetWindowRect(m_owner,&hud);
-        if(IntersectRect(&overlap,&hud,&m_region)) {
-            Clear();SetStatus(L"Переместите HUD: он перекрывает левую шкалу",L"Move the HUD: it overlaps the range scale");return;
+        if(IntersectRect(&overlap,&hud,&m_region)||IntersectRect(&overlap,&hud,&m_headingRegion)) {
+            Clear();SetStatus(L"Переместите HUD: он перекрывает шкалу прицела",L"Move the HUD: it overlaps a sight scale");return;
         }
         m_mil=targetMil;m_distance=distance;m_tracking=tracking;m_active=true;
+        m_request={weapon,trajectory,targetMil,azimuth,tracking};
         if(!SetTimer(m_owner,TimerId,100,nullptr))throw_last_error();
         SetStatus(tracking?L"Сопровождение: распознаю шкалу…":L"Разовая проверка шкалы…",tracking?L"Tracking: reading the scale…":L"Reading the scale once…");
         Capture();
@@ -109,12 +116,13 @@ void AimAssist::Capture() {
     if(!ContextValid()){Clear();return;}
     HideMark();DwmFlush(); // Never feed our own mark back into OCR.
     auto image=CaptureRegion(m_region.left,m_region.top,m_region.right-m_region.left,m_region.bottom-m_region.top);
+    auto heading=CaptureRegion(m_headingRegion.left,m_headingRegion.top,m_headingRegion.right-m_headingRegion.left,m_headingRegion.bottom-m_headingRegion.top);
     auto job=std::make_shared<Job>();job->generation=++m_generation;job->capturedAt=GetTickCount64();m_lastCapture=job->capturedAt;
-    m_job=job;const HWND owner=m_owner;
-    m_worker=std::jthread([job,owner,image=std::move(image)]()mutable {
+    m_job=job;const HWND owner=m_owner;auto request=m_request;
+    m_worker=std::jthread([job,owner,request,image=std::move(image),heading=std::move(heading)]()mutable {
         try {
             init_apartment(apartment_type::multi_threaded);struct Apartment{~Apartment(){uninit_apartment();}} apartment;
-            auto output=std::make_shared<SightOutput>();auto operation=RecognizeSightAsync(std::move(image),output);
+            auto output=std::make_shared<SightOutput>();auto operation=RecognizeSightAsync(std::move(image),std::move(heading),request,output);
             {std::scoped_lock lock(job->mutex);job->operation=operation;if(job->cancelled)operation.Cancel();}
             operation.get();
             {std::scoped_lock lock(job->mutex);job->operation=nullptr;if(!job->cancelled)job->output=std::move(output);}
@@ -128,8 +136,8 @@ void AimAssist::Tick() {
     if(!m_active)return;
     if(!ContextValid()){Clear();SetStatus(L"Подсказка остановлена: окно игры изменилось",L"Hint stopped: the game window changed");return;}
     const auto now=GetTickCount64();
-    if(m_job&&now-m_job->capturedAt>2500){Clear();SetStatus(L"OCR не успел обновить шкалу. Повторите F5.",L"OCR timed out. Press F5 to retry.");return;}
-    if(m_mark&&now-m_lastCapture>(m_tracking?1000:8000)) {
+    if(m_job&&now-m_job->capturedAt>(m_tracking?3000:6000)){Clear();SetStatus(L"OCR не успел обновить шкалу. Повторите F5.",L"OCR timed out. Press F5 to retry.");return;}
+    if(m_guidesVisible&&now-m_lastCapture>(m_tracking?2000:8000)) {
         HideMark();
         if(!m_tracking){Clear();SetStatus(L"Снимок устарел. F5 — обновить риску",L"Snapshot expired. F5 refreshes the mark");return;}
         InvalidateRect(m_owner,nullptr,FALSE);
@@ -138,11 +146,14 @@ void AimAssist::Tick() {
         try{Capture();}catch(...){Clear();SetStatus(L"Захват остановлен. Повторите F5.",L"Capture stopped. Press F5 to retry.");}
     }
 }
-void AimAssist::DrawMark(SightSolution const& solution) {
-    const int left=m_region.left+static_cast<int>(std::lround(solution.tickX));
-    const int y=m_region.top+static_cast<int>(std::lround(solution.y));
-    const int width=m_center.x-left+1,height=11;
-    if(width<20||width>m_gameRect.right-m_gameRect.left||y<m_gameRect.top||y>=m_gameRect.bottom)throw hresult_error(E_INVALIDARG);
+void AimAssist::DrawMark(std::optional<SightSolution> const& solution,std::optional<HeadingSolution> const& heading) {
+    m_mark.reset();
+    const int left=std::max(m_gameRect.left,m_center.x-static_cast<int>(440*m_scale));
+    const int top=std::max(m_gameRect.top,m_center.y-static_cast<int>(350*m_scale));
+    const int right=std::min(m_gameRect.right,m_center.x+static_cast<int>(440*m_scale));
+    const int bottom=std::min(m_gameRect.bottom,m_center.y+static_cast<int>(270*m_scale));
+    const int width=right-left,height=bottom-top;
+    if(width<=0||height<=0)throw hresult_error(E_INVALIDARG);
     struct Canvas {
         HDC dc=CreateCompatibleDC(nullptr);HBITMAP bitmap{};HGDIOBJ old{};
         ~Canvas(){if(old&&old!=HGDI_ERROR)SelectObject(dc,old);if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);}
@@ -153,20 +164,48 @@ void AimAssist::DrawMark(SightSolution const& solution) {
     if(!canvas.bitmap||!pixels)throw_last_error();canvas.old=SelectObject(canvas.dc,canvas.bitmap);
     if(!canvas.old||canvas.old==HGDI_ERROR)throw_last_error();
     auto data=static_cast<uint32_t*>(pixels);std::fill_n(data,static_cast<size_t>(width)*height,0U);
-    const uint32_t color=std::abs(y-m_center.y)<=2*m_scale?0xff34d399:0xff38bdf8;
-    for(int row=0;row<height;++row)for(int x=0;x<width;++x)
-        if((row>=4&&row<=6)||x<2||x>=width-2)data[static_cast<size_t>(row)*width+x]=color;
-    POINT position{left,y-height/2},source{};SIZE size{width,height};BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
+    auto dot=[&](int x,int y,int radius,uint32_t color){x-=left;y-=top;for(int dy=-radius;dy<=radius;++dy)for(int dx=-radius;dx<=radius;++dx)
+        if(x+dx>=0&&x+dx<width&&y+dy>=0&&y+dy<height)data[static_cast<size_t>(y+dy)*width+x+dx]=color;};
+    auto line=[&](int x0,int y0,int x1,int y1,uint32_t color){
+        const int steps=std::max(std::abs(x1-x0),std::abs(y1-y0));
+        const int radius=std::max(1,static_cast<int>(std::lround(m_scale)));
+        for(int outline=1;outline>=0;--outline)for(int i=0;i<=steps;++i){const double t=steps?static_cast<double>(i)/steps:0;
+            dot(static_cast<int>(std::lround(x0+(x1-x0)*t)),static_cast<int>(std::lround(y0+(y1-y0)*t)),radius+outline,outline?0xff101827:color);}
+    };
+    auto arrow=[&](int x,int y,int dx,int dy,uint32_t color){
+        const int length=std::max(8,static_cast<int>(24*m_scale)),wing=std::max(4,static_cast<int>(8*m_scale));
+        line(x-dx*length,y-dy*length,x+dx*length,y+dy*length,color);
+        line(x+dx*length,y+dy*length,x+dx*(length-wing)-dy*wing,y+dy*(length-wing)+dx*wing,color);
+        line(x+dx*length,y+dy*length,x+dx*(length-wing)+dy*wing,y+dy*(length-wing)-dx*wing,color);
+    };
+    if(solution) {
+        const int y=m_region.top+static_cast<int>(std::lround(solution->y));
+        const bool aligned=std::abs(y-m_center.y)<=2*m_scale;const uint32_t color=aligned?0xff34d399:0xff38bdf8;
+        if(solution->direction==SightDirection::Visible) {
+            line(m_region.left+static_cast<int>(std::lround(solution->tickX)),y,m_center.x,y,color);
+            m_mark=solution->y/(m_region.bottom-m_region.top);
+        }
+        if(!aligned)arrow(m_center.x-static_cast<int>(385*m_scale),m_center.y-static_cast<int>(170*m_scale),0,y<m_center.y?-1:1,color);
+    }
+    if(heading) {
+        const uint32_t color=std::abs(heading->delta)<=.3?0xff34d399:0xfffbbf24;
+        if(heading->visible) {
+            const int x=m_headingRegion.left+static_cast<int>(std::lround(heading->x));
+            line(x,m_center.y-static_cast<int>(218*m_scale),x,m_center.y,color);
+        }
+        if(std::abs(heading->delta)>.3)arrow(m_center.x,m_center.y-static_cast<int>(320*m_scale),heading->delta<0?-1:1,0,color);
+    }
+    POINT position{left,top},source{};SIZE size{width,height};BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
     if(!UpdateLayeredWindow(m_marker,nullptr,&position,&size,canvas.dc,&source,0,&blend,ULW_ALPHA))throw_last_error();
     SetWindowPos(m_marker,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
-    m_mark=solution.y/(m_region.bottom-m_region.top);
+    m_guidesVisible=true;
 }
 void AimAssist::Finish(uint64_t generation) {
     if(!m_active||!m_job||generation!=m_generation||generation!=m_job->generation)return;
     if(m_worker.joinable())m_worker.join();auto job=std::exchange(m_job,nullptr);
     if(!ContextValid()){Clear();return;}
     m_nextScan=GetTickCount64()+350;
-    const auto maximumAge=m_tracking?1000ULL:2500ULL;
+    const auto maximumAge=m_tracking?2000ULL:5500ULL;
     if(GetTickCount64()-job->capturedAt>maximumAge){
         HideMark();++m_failures;
         if(m_tracking&&m_failures>=3)Clear();
@@ -177,30 +216,36 @@ void AimAssist::Finish(uint64_t generation) {
     if(!job->error.empty()||!job->output) {
         Clear();SetStatus(L"Windows OCR недоступен для прицела",L"Windows OCR is unavailable for the sight");return;
     }
-    auto solution=LocateSightWithText(job->output->labels,job->output->textLabels,m_mil,102.*m_scale/50.,std::max(2.,3.*m_scale));
-    m_preview=std::move(job->output->preview);
+    auto solution=job->output->solution;
+    m_preview=job->output->processed.bgra.empty()?std::move(job->output->preview):std::move(job->output->processed);
     if(!solution) {
         HideMark();++m_failures;
         auto [ru,en]=SightFailure(*job->output);
-        if(!m_tracking){m_active=false;KillTimer(m_owner,TimerId);}
+        if(!m_tracking&&!job->output->heading){m_active=false;KillTimer(m_owner,TimerId);}
         if(m_tracking&&m_failures>=3){
             auto preview=std::move(m_preview);Clear();m_preview=std::move(preview);
             SetStatus(L"Сопровождение остановлено. "+ru,L"Tracking stopped. "+en);
-        }else SetStatus(std::move(ru),std::move(en));
+        }else {
+            if(job->output->heading)try{DrawMark({},job->output->heading);}catch(...){}
+            SetStatus(std::move(ru),std::move(en));
+        }
         return;
     }
     m_failures=0;
     if(solution->direction!=SightDirection::Visible) {
         HideMark();const bool increase=solution->direction==SightDirection::IncreaseRange;
-        if(!m_tracking){m_active=false;KillTimer(m_owner,TimerId);}
+        try{DrawMark(solution,job->output->heading);}catch(...){}
         SetStatus(std::format(L"{} дальность: нужно {:.0f} м",increase?L"Увеличьте":L"Уменьшите",m_distance),
             std::format(L"{} range: target {:.0f} m",increase?L"Increase":L"Decrease",m_distance));return;
     }
     try {
-        DrawMark(*solution);
-        std::wstring ru=m_tracking?L"Сопровождение включено. Совместите риску с центром.":L"Разовая риска. После прокрутки обновите F5.";
-        std::wstring en=m_tracking?L"Tracking on. Align the mark with the sight centre.":L"Snapshot mark. Press F5 again after adjusting.";
-        if(solution->textAnchored){ru+=L" Привязка по цифрам и штриху.";en+=L" Anchored by labels and a tick.";}
+        DrawMark(solution,job->output->heading);
+        std::wstring ru=std::format(L"{} · {} ({}). ",m_tracking?L"F6":L"F5",job->output->filter,job->output->variants);
+        std::wstring en=ru;
+        if(solution->textAnchored){ru+=L"По цифрам + штриху. ";en+=L"Labels + tick. ";}
+        if(job->output->heading){ru+=std::format(L"Азимут {:.1f}°, {:+.1f}°. ",job->output->heading->current,job->output->heading->delta);en+=std::format(L"Heading {:.1f}°, {:+.1f}°. ",job->output->heading->current,job->output->heading->delta);}
+        else{ru+=L" Азимут не прочитан.";en+=L" Heading unreadable.";}
+        ru+=L" Совместите линии с центром.";en+=L" Align the lines with the centre.";
         SetStatus(std::move(ru),std::move(en));
     }catch(...){Clear();SetStatus(L"Не удалось вывести риску",L"Could not display the mark");}
 }
